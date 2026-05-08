@@ -100,30 +100,30 @@ jobs:
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
             
             # Create .htaccess for React SPA routing
-            cat > "$FRONTEND_ROOT/.htaccess" <<'HTEND'
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteBase /
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^ index.html [L]
-</IfModule>
-HTEND
+            {
+              echo '<IfModule mod_rewrite.c>'
+              echo 'RewriteEngine On'
+              echo 'RewriteBase /'
+              echo 'RewriteCond %{REQUEST_FILENAME} !-f'
+              echo 'RewriteCond %{REQUEST_FILENAME} !-d'
+              echo 'RewriteRule ^ index.html [L]'
+              echo '</IfModule>'
+            } > "$FRONTEND_ROOT/.htaccess"
             
             # Create API index.php that boots Laravel
-            cat > "$API_ROOT/index.php" <<'PHPEND'
-<?php
-use Illuminate\Foundation\Application;
-use Illuminate\Http\Request;
-define('LARAVEL_START', microtime(true));
-$backendRoot = '${{ secrets.TARGET_DIR }}/backend';
-if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
-    require $maintenance;
-}
-require $backendRoot.'/vendor/autoload.php';
-$app = require_once $backendRoot.'/bootstrap/app.php';
-$app->handleRequest(Request::capture());
-PHPEND
+            {
+              echo '<?php'
+              echo 'use Illuminate\Foundation\Application;'
+              echo 'use Illuminate\Http\Request;'
+              echo 'define("LARAVEL_START", microtime(true));'
+              echo '$backendRoot = "'"'"'${{ secrets.TARGET_DIR }}/backend'"'"'";'
+              echo 'if (file_exists($maintenance = $backendRoot."/storage/framework/maintenance.php")) {'
+              echo '  require $maintenance;'
+              echo '}'
+              echo 'require $backendRoot."/vendor/autoload.php";'
+              echo '$app = require_once $backendRoot."/bootstrap/app.php";'
+              echo '$app->handleRequest(Request::capture());'
+            } > "$API_ROOT/index.php"
             
             ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
