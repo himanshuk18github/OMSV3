@@ -31,7 +31,7 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run build
 
       - name: Create artifact
@@ -80,7 +80,7 @@ jobs:
             fi
             if command -v npm >/dev/null 2>&1; then
               cd frontend
-              npm ci
+              npm ci --legacy-peer-deps
               npm run build
               cd -
             fi
