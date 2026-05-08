@@ -8,7 +8,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="branding">
           <Link to="/">
             <img
-              src="https://app.apnistationery.com/FULLSIZE.png"
+              src="/LOGO.png"
               alt="Apni Stationery"
               className="logo"
             />
