@@ -36,7 +36,9 @@ jobs:
 
       - name: Create artifact
         run: |
-          tar --exclude='.git' --exclude='node_modules' --exclude='vendor' -czf artifact.tar.gz .
+          mkdir -p /tmp/artifact
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='vendor' --exclude='artifact.tar.gz' . /tmp/artifact/
+          tar -C /tmp/artifact -czf artifact.tar.gz .
 
       - name: Start SSH Agent
         uses: webfactory/ssh-agent@v0.5.3
