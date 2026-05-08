@@ -82,7 +82,16 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.TARGET_DIR }}
-            tar -xzf artifact.tar.gz -C ${{ secrets.TARGET_DIR }}
+            ls -la
+            ARTIFACT_PATH="${{ secrets.TARGET_DIR }}/artifact.tar.gz"
+            if [ ! -f "$ARTIFACT_PATH" ]; then
+              ARTIFACT_PATH="$(find ${{ secrets.TARGET_DIR }} -type f -name 'artifact.tar.gz' | head -n 1)"
+            fi
+            if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
+              echo "artifact.tar.gz not found under ${{ secrets.TARGET_DIR }}"
+              exit 1
+            fi
+            tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
             if command -v composer >/dev/null 2>&1; then
               cd ${{ secrets.TARGET_DIR }}/backend
               composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
