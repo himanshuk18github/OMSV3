@@ -99,38 +99,9 @@ jobs:
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
             cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteBase /
-
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteRule ^ index.html [L]
-</IfModule>
-HTACCESS
-            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-    <IfModule mod_negotiation.c>
-        Options -MultiViews -Indexes
-    </IfModule>
-
-    RewriteEngine On
-
-    RewriteCond %{HTTP:Authorization} .
-    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-    RewriteCond %{HTTP:x-xsrf-token} .
-    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
-
-    RewriteCond %{REQUEST_FILENAME} !-d
-    RewriteCond %{REQUEST_URI} (.+)/$
-    RewriteRule ^ %1 [L,R=301]
-
-    RewriteCond %{REQUEST_FILENAME} !-f
-    RewriteRule ^ index.php [L]
-</IfModule>
-HTACCESS
-            cat > "$API_ROOT/index.php" <<'PHP'
+            printf '%s
+      ' '<IfModule mod_rewrite.c>' '    RewriteEngine On' '    RewriteBase /' '' '    RewriteCond %{REQUEST_FILENAME} !-f' '    RewriteCond %{REQUEST_FILENAME} !-d' '    RewriteRule ^ index.html [L]' '</IfModule>' > "$FRONTEND_ROOT/.htaccess"
+            printf '%s
 <?php
 
 use Illuminate\Foundation\Application;
