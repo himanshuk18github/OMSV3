@@ -78,7 +78,9 @@ jobs:
             cd ${{ secrets.TARGET_DIR }}
             tar -xzf artifact.tar.gz -C ${{ secrets.TARGET_DIR }}
             if command -v composer >/dev/null 2>&1; then
+              cd ${{ secrets.TARGET_DIR }}/backend
               composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+              cd ${{ secrets.TARGET_DIR }}
             fi
             if command -v npm >/dev/null 2>&1; then
               cd frontend
@@ -86,15 +88,15 @@ jobs:
               npm run build
               cd -
             fi
-            rsync -av --delete ${{ secrets.TARGET_DIR }}/public/ ${{ secrets.PUBLIC_DIR }}/
+            rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ ${{ secrets.PUBLIC_DIR }}/
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
-              printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/.env
+              printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
             fi
-            ln -sf ${{ secrets.TARGET_DIR }}/storage/app/public ${{ secrets.PUBLIC_DIR }}/storage
+            ln -sf ${{ secrets.TARGET_DIR }}/backend/storage/app/public ${{ secrets.PUBLIC_DIR }}/storage
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
-            chmod -R 775 ${{ secrets.TARGET_DIR }}/storage ${{ secrets.TARGET_DIR }}/bootstrap/cache || true
-            if [ -f "${{ secrets.TARGET_DIR }}/artisan" ]; then
-              php ${{ secrets.TARGET_DIR }}/artisan config:clear || true
-              php ${{ secrets.TARGET_DIR }}/artisan route:clear || true
-              php ${{ secrets.TARGET_DIR }}/artisan view:clear || true
+            chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
+            if [ -f "${{ secrets.TARGET_DIR }}/backend/artisan" ]; then
+              php ${{ secrets.TARGET_DIR }}/backend/artisan config:clear || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan route:clear || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan view:clear || true
             fi
