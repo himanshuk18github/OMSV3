@@ -93,17 +93,25 @@ jobs:
             fi
             tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
-            rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ ${{ secrets.PUBLIC_DIR }}/
+            SOURCE_PUBLIC="${{ secrets.TARGET_DIR }}/backend/public/"
             FALLBACK_PUBLIC="/home/${{ secrets.SSH_USER }}/public_html"
-            if [ "$FALLBACK_PUBLIC" != "${{ secrets.PUBLIC_DIR }}" ] && [ -d "$FALLBACK_PUBLIC" ]; then
-              rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ "$FALLBACK_PUBLIC"/
-            fi
+            DOCROOTS="${{ secrets.PUBLIC_DIR }} $FALLBACK_PUBLIC"
+            for d in /home/${{ secrets.SSH_USER }}/domains/*/public_html; do
+              if [ -d "$d" ]; then
+                DOCROOTS="$DOCROOTS $d"
+              fi
+            done
+            for DOCROOT in $DOCROOTS; do
+              [ -n "$DOCROOT" ] || continue
+              mkdir -p "$DOCROOT"
+              echo "Syncing public files to: $DOCROOT"
+              rsync -av --delete "$SOURCE_PUBLIC" "$DOCROOT"/
+              rm -f "$DOCROOT/default.php" "$DOCROOT/default.htm" "$DOCROOT/default.html"
+              ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$DOCROOT"/storage
+              ls -la "$DOCROOT"
+            done
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
-            fi
-            ln -sf ${{ secrets.TARGET_DIR }}/backend/storage/app/public ${{ secrets.PUBLIC_DIR }}/storage
-            if [ -d "$FALLBACK_PUBLIC" ]; then
-              ln -sf ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$FALLBACK_PUBLIC"/storage
             fi
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
             chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
