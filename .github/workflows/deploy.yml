@@ -98,10 +98,16 @@ jobs:
             mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
-            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
-            printf '%s
-      ' '<IfModule mod_rewrite.c>' '    RewriteEngine On' '    RewriteBase /' '' '    RewriteCond %{REQUEST_FILENAME} !-f' '    RewriteCond %{REQUEST_FILENAME} !-d' '    RewriteRule ^ index.html [L]' '</IfModule>' > "$FRONTEND_ROOT/.htaccess"
-            printf '%s
+            printf '%s\n' \
+              '<IfModule mod_rewrite.c>' \
+              '    RewriteEngine On' \
+              '    RewriteBase /' \
+              '' \
+              '    RewriteCond %{REQUEST_FILENAME} !-f' \
+              '    RewriteCond %{REQUEST_FILENAME} !-d' \
+              '    RewriteRule ^ index.html [L]' \
+              '</IfModule>' > "$FRONTEND_ROOT/.htaccess"
+            cat > "$API_ROOT/index.php" <<'PHPEOF'
 <?php
 
 use Illuminate\Foundation\Application;
@@ -121,7 +127,7 @@ require $backendRoot.'/vendor/autoload.php';
 $app = require_once $backendRoot.'/bootstrap/app.php';
 
 $app->handleRequest(Request::capture());
-PHP
+PHPEOF
             ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
             ls -la "$API_ROOT"
