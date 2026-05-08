@@ -107,12 +107,34 @@ jobs:
               echo "Syncing public files to: $DOCROOT"
               rsync -av --delete "$SOURCE_PUBLIC" "$DOCROOT"/
               rm -f "$DOCROOT/default.php" "$DOCROOT/default.htm" "$DOCROOT/default.html"
+              cat > "$DOCROOT/index.php" <<'PHP'
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+$backendRoot = '${{ secrets.TARGET_DIR }}/backend';
+
+if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+require $backendRoot.'/vendor/autoload.php';
+
+/** @var Application $app */
+$app = require_once $backendRoot.'/bootstrap/app.php';
+
+$app->handleRequest(Request::capture());
+PHP
               ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$DOCROOT"/storage
               ls -la "$DOCROOT"
             done
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
             fi
+            php -r 'if (PHP_VERSION_ID < 80300) { fwrite(STDERR, "WARNING: Server PHP ".PHP_VERSION." is below required 8.3 for this app.\n"); }'
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
             chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
             if [ -f "${{ secrets.TARGET_DIR }}/backend/artisan" ]; then
