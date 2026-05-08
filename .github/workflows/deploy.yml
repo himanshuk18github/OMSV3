@@ -1,0 +1,97 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main, clean-backend-frontend ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql
+          tools: composer:2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install backend dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create artifact
+        run: |
+          tar --exclude='.git' --exclude='node_modules' --exclude='vendor' -czf artifact.tar.gz .
+
+      - name: Start SSH Agent
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Ensure remote directories
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            mkdir -p ${{ secrets.TARGET_DIR }}
+            mkdir -p ${{ secrets.PUBLIC_DIR }}
+
+      - name: Upload artifact
+        uses: appleboy/scp-action@v0.1.6
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: artifact.tar.gz
+          target: ${{ secrets.TARGET_DIR }}
+
+      - name: Deploy on remote
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.TARGET_DIR }}
+            tar -xzf artifact.tar.gz -C ${{ secrets.TARGET_DIR }}
+            if command -v composer >/dev/null 2>&1; then
+              composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+            fi
+            if command -v npm >/dev/null 2>&1; then
+              cd frontend
+              npm ci
+              npm run build
+              cd -
+            fi
+            rsync -av --delete ${{ secrets.TARGET_DIR }}/public/ ${{ secrets.PUBLIC_DIR }}/
+            if [ -n "${{ secrets.ENV_FILE }}" ]; then
+              printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/.env
+            fi
+            ln -sf ${{ secrets.TARGET_DIR }}/storage/app/public ${{ secrets.PUBLIC_DIR }}/storage
+            chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
+            chmod -R 775 ${{ secrets.TARGET_DIR }}/storage ${{ secrets.TARGET_DIR }}/bootstrap/cache || true
+            if [ -f "${{ secrets.TARGET_DIR }}/artisan" ]; then
+              php ${{ secrets.TARGET_DIR }}/artisan config:clear || true
+              php ${{ secrets.TARGET_DIR }}/artisan route:clear || true
+              php ${{ secrets.TARGET_DIR }}/artisan view:clear || true
+            fi
