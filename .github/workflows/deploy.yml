@@ -112,30 +112,60 @@ jobs:
             mkdir -p "$API_ROOT"
             
             # Create .htaccess for React SPA routing
-            {
-              echo '<IfModule mod_rewrite.c>'
-              echo 'RewriteEngine On'
-              echo 'RewriteBase /'
-              echo 'RewriteCond %{REQUEST_FILENAME} !-f'
-              echo 'RewriteCond %{REQUEST_FILENAME} !-d'
-              echo 'RewriteRule ^ index.html [L]'
-              echo '</IfModule>'
-            } > "$FRONTEND_ROOT/.htaccess"
+            # Create .htaccess for React SPA routing but exclude /api so API PHP scripts receive requests
+            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # If the request targets the api folder, route to the API bootstrap
+  RewriteCond %{REQUEST_URI} ^/api [NC]
+  RewriteRule ^api/?(.*)$ /api/index.php [L,QSA]
+
+  # Serve existing files and directories directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Fallback to index.html for client-side routes
+  RewriteRule ^ index.html [L]
+</IfModule>
+HTACCESS
             
             # Create API index.php that boots Laravel
-            {
-              echo '<?php'
-              echo 'use Illuminate\Foundation\Application;'
-              echo 'use Illuminate\Http\Request;'
-              echo 'define("LARAVEL_START", microtime(true));'
-              echo '$backendRoot = "'"'"'${{ secrets.TARGET_DIR }}/backend'"'"'";'
-              echo 'if (file_exists($maintenance = $backendRoot."/storage/framework/maintenance.php")) {'
-              echo '  require $maintenance;'
-              echo '}'
-              echo 'require $backendRoot."/vendor/autoload.php";'
-              echo '$app = require_once $backendRoot."/bootstrap/app.php";'
-              echo '$app->handleRequest(Request::capture());'
-            } > "$API_ROOT/index.php"
+            # Create API bootstrap index.php (absolute backend paths)
+            cat > "$API_ROOT/index.php" <<'PHP'
+      <?php
+      define('LARAVEL_START', microtime(true));
+
+      // Absolute path to backend (set by GitHub Actions secret TARGET_DIR)
+      $backendRoot = '${{ secrets.TARGET_DIR }}/backend';
+
+      if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
+        require $maintenance;
+      }
+
+      require $backendRoot.'/vendor/autoload.php';
+      $app = require_once $backendRoot.'/bootstrap/app.php';
+
+      $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
+
+      $request = Illuminate\Http\Request::capture();
+      $response = $kernel->handle($request);
+      $response->send();
+      $kernel->terminate($request, $response);
+      PHP
+
+            # Create a simple POST test endpoint to verify POSTs reach PHP
+            cat > "$API_ROOT/test_post.php" <<'PHP'
+<?php
+header('Content-Type: application/json');
+echo json_encode([
+  'method' => $_SERVER['REQUEST_METHOD'],
+  'headers' => function_exists('getallheaders') ? getallheaders() : [],
+  'body' => file_get_contents('php://input'),
+]);
+PHP
             
             ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
@@ -161,7 +191,8 @@ jobs:
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
             chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
             if [ -f "${{ secrets.TARGET_DIR }}/backend/artisan" ]; then
-              php ${{ secrets.TARGET_DIR }}/backend/artisan config:clear || true
-              php ${{ secrets.TARGET_DIR }}/backend/artisan route:clear || true
-              php ${{ secrets.TARGET_DIR }}/backend/artisan view:clear || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan optimize:clear || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan config:cache || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan route:cache || true
+              php ${{ secrets.TARGET_DIR }}/backend/artisan view:cache || true
             fi
