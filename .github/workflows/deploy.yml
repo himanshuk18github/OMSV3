@@ -98,37 +98,33 @@ jobs:
             mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
-            cat > "$FRONTEND_ROOT/.htaccess" <<'EOF'
+            
+            # Create .htaccess for React SPA routing
+            cat > "$FRONTEND_ROOT/.htaccess" <<'HTEND'
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
-    
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^ index.html [L]
 </IfModule>
-EOF
-            cat > "$API_ROOT/index.php" <<'EOF'
+HTEND
+            
+            # Create API index.php that boots Laravel
+            cat > "$API_ROOT/index.php" <<'PHPEND'
 <?php
-
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
-
 define('LARAVEL_START', microtime(true));
-
 $backendRoot = '${{ secrets.TARGET_DIR }}/backend';
-
 if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
     require $maintenance;
 }
-
 require $backendRoot.'/vendor/autoload.php';
-
-/** @var Application $app */
 $app = require_once $backendRoot.'/bootstrap/app.php';
-
 $app->handleRequest(Request::capture());
-EOF
+PHPEND
+            
             ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
             ls -la "$API_ROOT"
