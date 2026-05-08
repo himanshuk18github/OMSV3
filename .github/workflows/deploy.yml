@@ -37,7 +37,7 @@ jobs:
       - name: Create artifact
         run: |
           mkdir -p /tmp/artifact
-          rsync -a --exclude='.git' --exclude='node_modules' --exclude='vendor' --exclude='artifact.tar.gz' . /tmp/artifact/
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='artifact.tar.gz' . /tmp/artifact/
           tar -C /tmp/artifact -czf artifact.tar.gz .
 
       - name: Start SSH Agent
@@ -92,17 +92,7 @@ jobs:
               exit 1
             fi
             tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
-            if command -v composer >/dev/null 2>&1; then
-              cd ${{ secrets.TARGET_DIR }}/backend
-              composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
-              cd ${{ secrets.TARGET_DIR }}
-            fi
-            if command -v npm >/dev/null 2>&1; then
-              cd frontend
-              npm ci --legacy-peer-deps
-              npm run build
-              cd -
-            fi
+            echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ ${{ secrets.PUBLIC_DIR }}/
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
