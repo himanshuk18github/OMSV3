@@ -94,10 +94,17 @@ jobs:
             tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ ${{ secrets.PUBLIC_DIR }}/
+            FALLBACK_PUBLIC="/home/${{ secrets.SSH_USER }}/public_html"
+            if [ "$FALLBACK_PUBLIC" != "${{ secrets.PUBLIC_DIR }}" ] && [ -d "$FALLBACK_PUBLIC" ]; then
+              rsync -av --delete ${{ secrets.TARGET_DIR }}/backend/public/ "$FALLBACK_PUBLIC"/
+            fi
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
             fi
             ln -sf ${{ secrets.TARGET_DIR }}/backend/storage/app/public ${{ secrets.PUBLIC_DIR }}/storage
+            if [ -d "$FALLBACK_PUBLIC" ]; then
+              ln -sf ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$FALLBACK_PUBLIC"/storage
+            fi
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
             chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
             if [ -f "${{ secrets.TARGET_DIR }}/backend/artisan" ]; then
