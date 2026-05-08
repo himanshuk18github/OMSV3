@@ -1,0 +1,185 @@
+/* Unique, page-specific styles for the sales order update table */
+/* Prefix: .salesorder-v4- */
+
+.salesorder-v4-mainarea {
+  width: 1600px;
+  min-height: 80vh;
+  background: #f5f5f5;
+  box-sizing: border-box;
+  padding: 24px 0 0 0;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.salesorder-v4-paper {
+  padding: 20px 20px 12px 20px;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(56,65,74,.09);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.salesorder-v4-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.salesorder-v4-title {
+  font-weight: 600;
+  font-size: 20px;
+  color: #424242;
+  letter-spacing: .5px;
+}
+
+.salesorder-v4-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px #e0e0e0;
+  margin-top: 8px;
+  box-sizing: border-box;
+  max-height: 70vh;
+}
+
+/* TABLE/CELL BORDERS: classic v4 style, only horizontal and subtle right border */
+.salesorder-v4-table {
+  min-width: 2200px;
+  width: 100%;
+  font-size: 14px;
+  box-sizing: border-box;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.salesorder-v4-table th,
+.salesorder-v4-table td {
+  min-width: 150px;
+  white-space: nowrap;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  padding-right: 10px; /* horizontal gap between fields */
+  border-bottom: 1px solid #bdbdbd;
+  border-right: 1px solid #e0e0e0;
+  vertical-align: middle;
+  background-clip: padding-box;
+}
+
+.salesorder-v4-table th:last-child,
+.salesorder-v4-table td:last-child {
+  border-right: none;
+}
+
+.salesorder-v4-table td[data-column="invoice_no"], 
+.salesorder-v4-table th[data-column="invoice_no"] {
+  min-width: 300px;
+  max-width: 300px;
+}
+
+.salesorder-v4-header-cell {
+  background: #f5f5f5;
+  color: #333 !important;
+  font-weight: 600 !important;
+  border-bottom: 1px solid #bdbdbd;
+  border-right: 1px solid #e0e0e0;
+  padding: 10px 8px;
+  white-space: nowrap;
+  font-size: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.salesorder-v4-body-cell {
+  background: #fff;
+  color: #222;
+  font-size: 14px;
+  vertical-align: middle;
+}
+
+/* Prevent input/select overlap and ensure 10px gap between fields in edit mode */
+.salesorder-v4-table .MuiFormControl-root,
+.salesorder-v4-table .MuiInputBase-root,
+.salesorder-v4-table .MuiSelect-root,
+.salesorder-v4-table .MuiTextField-root {
+  width: 100%;
+  min-width: 0;
+  margin-right: 0;
+  margin-bottom: 0;
+  margin-top: 0;
+  box-sizing: border-box;
+}
+
+.salesorder-v4-table .MuiInputBase-input,
+.salesorder-v4-table .MuiSelect-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+  padding: 8px 8px;
+}
+
+/* Add 10px gap between fields/inputs inside the cell */
+.salesorder-v4-table .MuiFormControl-root,
+.salesorder-v4-table .MuiInputBase-root,
+.salesorder-v4-table .MuiSelect-root,
+.salesorder-v4-table .MuiTextField-root {
+  margin-right: 10px;
+}
+
+/* Remove right margin for last input/select in a cell for a neat look */
+.salesorder-v4-table td > .MuiFormControl-root:last-child,
+.salesorder-v4-table td > .MuiInputBase-root:last-child,
+.salesorder-v4-table td > .MuiSelect-root:last-child,
+.salesorder-v4-table td > .MuiTextField-root:last-child {
+  margin-right: 0;
+}
+
+/* Make sure date fields and text fields do not overflow and are aligned */
+.salesorder-v4-table input[type="date"],
+.salesorder-v4-table input[type="text"],
+.salesorder-v4-table input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 8px;
+  font-size: 14px;
+}
+
+/* Prevent MUI outlined inputs from overflowing on focus */
+.salesorder-v4-table .MuiOutlinedInput-root {
+  padding-right: 0;
+}
+
+/* Extra: shrink icon buttons to fit in cells */
+.salesorder-v4-iconbtn {
+  border-radius: 2px !important;
+  background: #f5f5f5;
+  margin-right: 2px;
+  transition: background 0.2s;
+  color: #444 !important;
+  padding: 4px;
+  min-width: 28px;
+  min-height: 28px;
+}
+.salesorder-v4-iconbtn:hover {
+  background: #e0e0e0;
+}
+
+@media (max-width: 1700px) {
+  .salesorder-v4-mainarea {
+    width: 100vw;
+    min-width: 320px;
+  }
+  .salesorder-v4-paper,
+  .salesorder-v4-table-scroll {
+    width: 100%;
+  }
+}
+@media (max-width: 900px) {
+  .salesorder-v4-paper {
+    padding: 6px 2vw;
+  }
+}

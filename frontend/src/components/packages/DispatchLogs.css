@@ -1,0 +1,95 @@
+.dispatch-logs-container {
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.back-button {
+  color: #666;
+}
+
+.search-field {
+  min-width: 300px;
+}
+
+.logs-table {
+  margin-top: 16px;
+}
+
+.status-badge {
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-badge.pending {
+  background-color: #fff3e0;
+  color: #f57c00;
+}
+
+.status-badge.completed {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-badge.cancelled {
+  background-color: #ffebee;
+  color: #c62828;
+}
+
+.no-records {
+  padding: 32px !important;
+  text-align: center;
+  color: #666;
+}
+
+.log-row:hover {
+  background-color: #f5f5f5;
+}
+
+.table-pagination {
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Modal Styles */
+.log-details-modal {
+  min-width: 80vw;
+}
+
+.log-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.log-details-content {
+  padding: 24px;
+}
+
+.download-button {
+  color: #1976d2;
+}
+
+.download-button:hover {
+  color: #1565c0;
+}
