@@ -38,7 +38,7 @@ jobs:
           tar --exclude='.git' --exclude='node_modules' --exclude='vendor' -czf artifact.tar.gz .
 
       - name: Start SSH Agent
-        uses: webfactory/ssh-agent@v0.8.1
+        uses: webfactory/ssh-agent@v0.5.3
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
