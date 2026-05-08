@@ -102,9 +102,12 @@ jobs:
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ secrets.PUBLIC_DIR }}"
             API_ROOT="${{ secrets.PUBLIC_DIR }}/api"
-            mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
+            # Ensure frontend root exists, sync the built SPA, then create API folder
+            mkdir -p "$FRONTEND_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
+            # Re-create API folder after rsync in case rsync --delete removed it
+            mkdir -p "$API_ROOT"
             
             # Create .htaccess for React SPA routing
             {
