@@ -93,44 +93,67 @@ jobs:
             fi
             tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
-            SOURCE_PUBLIC="${{ secrets.TARGET_DIR }}/backend/public/"
-            FALLBACK_PUBLIC="/home/${{ secrets.SSH_USER }}/public_html"
-            DOCROOTS="${{ secrets.PUBLIC_DIR }} $FALLBACK_PUBLIC"
-            for d in /home/${{ secrets.SSH_USER }}/domains/*/public_html; do
-              if [ -d "$d" ]; then
-                DOCROOTS="$DOCROOTS $d"
-              fi
-            done
-            for DOCROOT in $DOCROOTS; do
-              [ -n "$DOCROOT" ] || continue
-              mkdir -p "$DOCROOT"
-              echo "Syncing public files to: $DOCROOT"
-              rsync -av --delete "$SOURCE_PUBLIC" "$DOCROOT"/
-              rm -f "$DOCROOT/default.php" "$DOCROOT/default.htm" "$DOCROOT/default.html"
-              {
-                echo '<?php'
-                echo
-                echo 'use Illuminate\Foundation\Application;'
-                echo 'use Illuminate\Http\Request;'
-                echo
-                echo "define('LARAVEL_START', microtime(true));"
-                echo
-                echo "\$backendRoot = '${{ secrets.TARGET_DIR }}/backend';"
-                echo
-                echo "if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {"
-                echo '    require $maintenance;'
-                echo '}'
-                echo
-                echo "require \$backendRoot.'/vendor/autoload.php';"
-                echo
-                echo '/** @var Application $app */'
-                echo "\$app = require_once \$backendRoot.'/bootstrap/app.php';"
-                echo
-                echo "\$app->handleRequest(Request::capture());"
-              } > "$DOCROOT/index.php"
-              ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$DOCROOT"/storage
-              ls -la "$DOCROOT"
-            done
+            FRONTEND_ROOT="${{ secrets.PUBLIC_DIR }}"
+            API_ROOT="${{ secrets.PUBLIC_DIR }}/api"
+            mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
+            echo "Syncing frontend build to web root: $FRONTEND_ROOT"
+            rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
+            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.html [L]
+</IfModule>
+HTACCESS
+            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+    <IfModule mod_negotiation.c>
+        Options -MultiViews -Indexes
+    </IfModule>
+
+    RewriteEngine On
+
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    RewriteCond %{HTTP:x-xsrf-token} .
+    RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+</IfModule>
+HTACCESS
+            cat > "$API_ROOT/index.php" <<'PHP'
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+$backendRoot = '${{ secrets.TARGET_DIR }}/backend';
+
+if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+require $backendRoot.'/vendor/autoload.php';
+
+/** @var Application $app */
+$app = require_once $backendRoot.'/bootstrap/app.php';
+
+$app->handleRequest(Request::capture());
+PHP
+            ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
+            ls -la "$FRONTEND_ROOT"
+            ls -la "$API_ROOT"
             ENV_PATH="${{ secrets.TARGET_DIR }}/backend/.env"
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
