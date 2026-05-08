@@ -110,8 +110,8 @@ jobs:
               {
                 echo '<?php'
                 echo
-                echo 'use Illuminate\\Foundation\\Application;'
-                echo 'use Illuminate\\Http\\Request;'
+                echo 'use Illuminate\Foundation\Application;'
+                echo 'use Illuminate\Http\Request;'
                 echo
                 echo "define('LARAVEL_START', microtime(true));"
                 echo
@@ -131,9 +131,23 @@ jobs:
               ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$DOCROOT"/storage
               ls -la "$DOCROOT"
             done
+            ENV_PATH="${{ secrets.TARGET_DIR }}/backend/.env"
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
-              printf '%s' "${{ secrets.ENV_FILE }}" > ${{ secrets.TARGET_DIR }}/backend/.env
+              printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
+            elif [ ! -f "$ENV_PATH" ]; then
+              cp "${{ secrets.TARGET_DIR }}/backend/.env.example" "$ENV_PATH"
             fi
+            if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
+              APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+              if grep -q '^APP_KEY=' "$ENV_PATH"; then
+                sed -i "s#^APP_KEY=.*#APP_KEY=$APP_KEY#" "$ENV_PATH"
+              else
+                echo "APP_KEY=$APP_KEY" >> "$ENV_PATH"
+              fi
+            fi
+            sed -i 's/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' "$ENV_PATH"
+            sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
+            sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
             php -r 'if (PHP_VERSION_ID < 80300) { fwrite(STDERR, "WARNING: Server PHP ".PHP_VERSION." is below required 8.3 for this app.\n"); }'
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
             chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
