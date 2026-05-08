@@ -52,6 +52,8 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 20m
           script: |
             mkdir -p ${{ secrets.TARGET_DIR }}
             mkdir -p ${{ secrets.PUBLIC_DIR }}
@@ -63,6 +65,8 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 20m
           source: artifact.tar.gz
           target: ${{ secrets.TARGET_DIR }}
 
@@ -73,6 +77,8 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 30m
           script: |
             set -e
             cd ${{ secrets.TARGET_DIR }}
