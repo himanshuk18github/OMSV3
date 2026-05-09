@@ -110,6 +110,32 @@ jobs:
             rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
             # Re-create API folder after rsync in case rsync --delete removed it
             mkdir -p "$API_ROOT"
+
+            # Create API .htaccess to route /api/* to API front controller
+            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
+            <IfModule mod_rewrite.c>
+              <IfModule mod_negotiation.c>
+                Options -MultiViews -Indexes
+              </IfModule>
+
+              RewriteEngine On
+
+              RewriteCond %{HTTP:Authorization} .
+              RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+              RewriteCond %{HTTP:x-xsrf-token} .
+              RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
+
+              RewriteCond %{REQUEST_FILENAME} !-d
+              RewriteCond %{REQUEST_URI} (.+)/$
+              RewriteRule ^ %1 [L,R=301]
+
+              RewriteCond %{REQUEST_FILENAME} !-d
+              RewriteCond %{REQUEST_FILENAME} !-f
+              RewriteRule ^ index.php [L]
+            </IfModule>
+            HTACCESS
+            sed -i 's/^            //' "$API_ROOT/.htaccess"
             
             # Create .htaccess for React SPA routing
             # Create .htaccess for React SPA routing but exclude /api so API PHP scripts receive requests
@@ -137,6 +163,9 @@ jobs:
             # Create API bootstrap index.php (absolute backend paths)
             cat > "$API_ROOT/index.php" <<'PHP'
             <?php
+            use Illuminate\Foundation\Application;
+            use Illuminate\Http\Request;
+
             define('LARAVEL_START', microtime(true));
 
             // Absolute path to backend (set by GitHub Actions secret TARGET_DIR)
@@ -147,14 +176,10 @@ jobs:
             }
 
             require $backendRoot.'/vendor/autoload.php';
+
+            /** @var Application $app */
             $app = require_once $backendRoot.'/bootstrap/app.php';
-
-            $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
-
-            $request = Illuminate\Http\Request::capture();
-            $response = $kernel->handle($request);
-            $response->send();
-            $kernel->terminate($request, $response);
+            $app->handleRequest(Request::capture());
             PHP
             sed -i 's/^            //' "$API_ROOT/index.php"
 
