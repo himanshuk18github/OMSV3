@@ -8,8 +8,9 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     env:
+      DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN || 'app.apnistationery.com' }}
       TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/apps/oms', secrets.SSH_USER) }}
-      PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN) }}
+      PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN || 'app.apnistationery.com') }}
 
     steps:
       - name: Checkout
@@ -66,10 +67,7 @@ jobs:
             echo "Missing required secret: SSH_PRIVATE_KEY"
             exit 1
           fi
-          if [ -z "${{ secrets.DEPLOY_DOMAIN }}" ]; then
-            echo "Missing required secret: DEPLOY_DOMAIN"
-            exit 1
-          fi
+          echo "Derived DEPLOY_DOMAIN=${{ env.DEPLOY_DOMAIN }}"
           echo "Derived TARGET_DIR=${{ env.TARGET_DIR }}"
           echo "Derived PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
 
@@ -285,4 +283,4 @@ jobs:
             curl -i --max-time 10 "http://127.0.0.1/api/test_post" || true
             curl -i --max-time 10 "http://localhost/api/test_post" || true
             echo "--- curl public domain api/test_post ---"
-            curl -i --max-time 10 "https://${{ secrets.DEPLOY_DOMAIN }}/api/test_post" || true
+            curl -i --max-time 10 "https://${{ env.DEPLOY_DOMAIN }}/api/test_post" || true
