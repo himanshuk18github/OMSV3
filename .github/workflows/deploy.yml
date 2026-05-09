@@ -125,15 +125,19 @@ jobs:
             set -e
             cd ${{ env.TARGET_DIR }}
             ls -la
-            ARTIFACT_PATH="${{ env.TARGET_DIR }}/artifact.tar.gz"
-            if [ ! -f "$ARTIFACT_PATH" ]; then
-              ARTIFACT_PATH="$(find ${{ env.TARGET_DIR }} -type f -name 'artifact.tar.gz' | head -n 1)"
+            # scp-action may already extract uploaded content into TARGET_DIR.
+            # Only look for artifact tarball when source folders are not present.
+            if [ ! -d "${{ env.TARGET_DIR }}/backend" ] || [ ! -d "${{ env.TARGET_DIR }}/frontend" ]; then
+              ARTIFACT_PATH="${{ env.TARGET_DIR }}/artifact.tar.gz"
+              if [ ! -f "$ARTIFACT_PATH" ]; then
+                ARTIFACT_PATH="$(find ${{ env.TARGET_DIR }} -type f -name 'artifact.tar.gz' | head -n 1)"
+              fi
+              if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
+                echo "Neither extracted source folders nor artifact.tar.gz were found under ${{ env.TARGET_DIR }}"
+                exit 1
+              fi
+              tar -xzf "$ARTIFACT_PATH" -C ${{ env.TARGET_DIR }}
             fi
-            if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
-              echo "artifact.tar.gz not found under ${{ env.TARGET_DIR }}"
-              exit 1
-            fi
-            tar -xzf "$ARTIFACT_PATH" -C ${{ env.TARGET_DIR }}
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
