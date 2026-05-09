@@ -35,8 +35,8 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         env:
-          # Use index.php front controller path to avoid 404s when /api rewrite rules are not applied.
-          VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php
+          # Use canonical API base; /api folder is deployed and handled by API .htaccess.
+          VITE_API_BASE_URL: https://app.apnistationery.com/api
         run: |
           npm ci --legacy-peer-deps
           npm run build
@@ -171,20 +171,19 @@ jobs:
             sed -i 's/^            //' "$API_ROOT/.htaccess"
             
             # Create .htaccess for React SPA routing
-            # Create .htaccess for React SPA routing but exclude /api so API PHP scripts receive requests
+            # Create .htaccess for React SPA routing while excluding /api paths.
             cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
             <IfModule mod_rewrite.c>
               RewriteEngine On
               RewriteBase /
 
-              # If the request targets the api folder, route to the API bootstrap
-              RewriteCond %{REQUEST_URI} ^/api [NC]
-              RewriteRule ^api/?(.*)$ /api/index.php [L,QSA]
-
               # Serve existing files and directories directly
               RewriteCond %{REQUEST_FILENAME} -f [OR]
               RewriteCond %{REQUEST_FILENAME} -d
               RewriteRule ^ - [L]
+
+              # Do not rewrite API requests to SPA fallback.
+              RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
 
               # Fallback to index.html for client-side routes
               RewriteRule ^ index.html [L]
