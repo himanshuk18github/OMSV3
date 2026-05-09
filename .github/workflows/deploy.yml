@@ -67,8 +67,8 @@ jobs:
 
       - name: Ensure remote directories (with connectivity test)
         run: |
-          echo "Testing SSH connectivity to ${{ secrets.SSH_HOST }}:${{ secrets.SSH_PORT || '22' }}"
-          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT || '22' }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'echo SSH_OK' || {
+          echo "Testing SSH connectivity to ${{ secrets.SSH_HOST }}:${{ secrets.SSH_PORT || '65002' }}"
+          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT || '65002' }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'echo SSH_OK' || {
             echo "SSH connectivity test failed. Check SSH_HOST, SSH_PORT, and firewall settings."
             exit 2
           }
@@ -76,7 +76,7 @@ jobs:
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '22' }}
+          port: ${{ secrets.SSH_PORT || '65002' }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 180s
@@ -99,7 +99,7 @@ jobs:
       - name: Upload backend and frontend build
         run: |
           set -e
-          SSH_PORT="${{ secrets.SSH_PORT || '22' }}"
+          SSH_PORT="${{ secrets.SSH_PORT || '65002' }}"
           SSH_USER="${{ secrets.SSH_USER }}"
           SSH_HOST="${{ secrets.SSH_HOST }}"
           TARGET_DIR="${{ env.TARGET_DIR }}"
@@ -120,7 +120,7 @@ jobs:
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '22' }}
+          port: ${{ secrets.SSH_PORT || '65002' }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
@@ -341,7 +341,7 @@ jobs:
         uses: appleboy/ssh-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '22' }}
+          port: ${{ secrets.SSH_PORT || '65002' }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
