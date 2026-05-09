@@ -365,3 +365,34 @@ jobs:
             curl -i --max-time 10 "https://${{ env.DEPLOY_DOMAIN }}/api/test_post.php" || true
             echo "--- curl public domain login route ---"
             curl -i --max-time 10 -X POST "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" -H "Accept: application/json" -H "Content-Type: application/json" -d '{}' || true
+
+            echo "--- Additional diagnostics ---"
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            if [ -d "$TARGET_DIR/staging/backend" ]; then
+              BACKEND_SOURCE="$TARGET_DIR/staging/backend"
+            else
+              BACKEND_SOURCE="$TARGET_DIR/backend"
+            fi
+            echo "Resolved BACKEND_SOURCE=$BACKEND_SOURCE"
+
+            ENV_PATH="$BACKEND_SOURCE/.env"
+            echo "--- .env (masked) ---"
+            if [ -f "$ENV_PATH" ]; then
+              sed -n '1,200p' "$ENV_PATH" | sed -E 's/^(DB_PASSWORD=).*/\1[REDACTED]/'
+            else
+              echo "no .env found at $ENV_PATH"
+            fi
+
+            echo "--- PHP CLI ---"
+            /opt/alt/php84/usr/bin/php -v || php -v || true
+
+            echo "--- Laravel log tail (last 200 lines per file) ---"
+            if [ -d "$BACKEND_SOURCE/storage/logs" ]; then
+              for f in "$BACKEND_SOURCE"/storage/logs/*.log; do
+                echo "--- LOG: $f ---"; tail -n 200 "$f" || true
+              done
+            else
+              echo "No storage/logs directory found"
+            fi
+
+            echo "--- End diagnostics ---"
