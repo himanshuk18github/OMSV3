@@ -1,19 +1,22 @@
+```yaml
 name: Build and Deploy
 
 on:
   push:
-    branches: [ main, clean-backend-frontend ]
+    branches:
+      - main
+      - clean-backend-frontend
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     env:
-      DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN || 'app.apnistationery.com' }}
-      TARGET_DIR: ${{ secrets.TARGET_DIR || '' }}
-      PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN || 'app.apnistationery.com') }}
-      SSH_HOST: ${{ secrets.SSH_HOST || '82.112.232.23' }}
-      SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
-      SSH_USER: ${{ secrets.SSH_USER || 'u902868468468' }}
+      DEPLOY_DOMAIN: app.apnistationery.com
+      SSH_HOST: 82.112.232.23
+      SSH_PORT: 65002
+      SSH_USER: u902868468468
+      PUBLIC_DIR: /home/u902868468468/domains/app.apnistationery.com/public_html
 
     steps:
       - name: Checkout
@@ -22,26 +25,35 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: "8.4"
           extensions: mbstring, pdo_mysql
           tools: composer:2
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install backend dependencies
         working-directory: ./backend
-        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+        run: |
+          composer install \
+            --no-dev \
+            --prefer-dist \
+            --no-interaction \
+            --optimize-autoloader
 
       - name: Build frontend
         working-directory: ./frontend
         env:
-          # Hostinger/LiteSpeed setup requires index.php front controller and Laravel api prefix.
           VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php/api
         run: |
-          npm ci --legacy-peer-deps
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+
           npm run build
 
       - name: Start SSH Agent
@@ -52,42 +64,67 @@ jobs:
       - name: Validate deployment secrets
         run: |
           set -e
+
           if [ -z "${{ env.SSH_HOST }}" ]; then
-            echo "Missing SSH host (expected Hostinger IP or domain)"
+            echo "Missing SSH_HOST"
             exit 1
           fi
+
           if [ -z "${{ env.SSH_USER }}" ]; then
-            echo "Missing SSH user"
+            echo "Missing SSH_USER"
             exit 1
           fi
+
           if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "Missing required secret: SSH_PRIVATE_KEY"
+            echo "Missing SSH_PRIVATE_KEY"
             exit 1
           fi
-          echo "Derived DEPLOY_DOMAIN=${{ env.DEPLOY_DOMAIN }}"
-          echo "Derived TARGET_DIR=${{ env.TARGET_DIR }}"
-          echo "Derived PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
-          echo "Using SSH_HOST=${{ env.SSH_HOST }}"
-          echo "Using SSH_PORT=${{ env.SSH_PORT }}"
-          echo "Using SSH_USER=${{ env.SSH_USER }}"
+
+          echo "DEPLOY_DOMAIN=${{ env.DEPLOY_DOMAIN }}"
+          echo "PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
+          echo "SSH_HOST=${{ env.SSH_HOST }}"
+          echo "SSH_PORT=${{ env.SSH_PORT }}"
+          echo "SSH_USER=${{ env.SSH_USER }}"
 
       - name: Resolve remote app directory
         id: resolve_remote_dir
         run: |
           set -e
-          REMOTE_APP_DIR="$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" 'for d in "$HOME/app" "$HOME/apps/oms" "$HOME/backend"; do if [ -d "$d" ]; then echo "$d"; exit 0; fi; done; echo "$HOME/app"')"
+
+          REMOTE_APP_DIR=$(
+            ssh \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o StrictHostKeyChecking=no \
+              -p "${{ env.SSH_PORT }}" \
+              "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+              '
+                for d in "$HOME/app" "$HOME/apps/oms" "$HOME/backend"; do
+                  if [ -d "$d" ]; then
+                    echo "$d"
+                    exit 0
+                  fi
+                done
+
+                echo "$HOME/app"
+              '
+          )
+
           echo "Resolved remote app dir: $REMOTE_APP_DIR"
           echo "target_dir=$REMOTE_APP_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Ensure remote directories (with connectivity test)
+      - name: Test SSH connectivity
         run: |
-          echo "Testing SSH connectivity to ${{ env.SSH_HOST }}:${{ env.SSH_PORT }} as ${{ env.SSH_USER }}"
-          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" 'echo SSH_OK' || {
-            echo "SSH connectivity test failed. Check SSH_HOST, SSH_PORT, and firewall settings."
-            exit 2
-          }
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o StrictHostKeyChecking=no \
+            -p "${{ env.SSH_PORT }}" \
+            "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+            'echo SSH_OK'
+
       - name: Ensure remote directories
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
           port: ${{ env.SSH_PORT }}
@@ -97,25 +134,33 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
+
             TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
             PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
 
-            if [ -z "$TARGET_DIR" ] || [ -z "$PUBLIC_DIR" ]; then
-              echo "TARGET_DIR or PUBLIC_DIR is empty. Check repository secrets."
+            if [ -z "$TARGET_DIR" ]; then
+              echo "TARGET_DIR is empty"
+              exit 1
+            fi
+
+            if [ -z "$PUBLIC_DIR" ]; then
+              echo "PUBLIC_DIR is empty"
               exit 1
             fi
 
             mkdir -p "$TARGET_DIR"
             mkdir -p "$PUBLIC_DIR"
+
             mkdir -p "$TARGET_DIR/staging/backend"
             mkdir -p "$TARGET_DIR/staging/frontend/dist"
 
       - name: Upload backend and frontend build
         run: |
           set -e
-          SSH_PORT="${{ secrets.SSH_PORT || '65002' }}"
-          SSH_USER="${{ secrets.SSH_USER }}"
-          SSH_HOST="${{ secrets.SSH_HOST }}"
+
+          SSH_PORT="${{ env.SSH_PORT }}"
+          SSH_USER="${{ env.SSH_USER }}"
+          SSH_HOST="${{ env.SSH_HOST }}"
           TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
 
           RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
@@ -131,236 +176,225 @@ jobs:
             "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/frontend/dist/"
 
       - name: Deploy on remote
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 120s
+          timeout: 180s
           command_timeout: 30m
           script: |
             set -e
+
             TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
             STAGING_DIR="$TARGET_DIR/staging"
-            BACKEND_DIR="$STAGING_DIR/backend"
-            FRONTEND_DIST="$STAGING_DIR/frontend/dist"
+
+            BACKEND_SOURCE="$STAGING_DIR/backend"
+            FRONTEND_SOURCE="$STAGING_DIR/frontend/dist"
+
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
 
-            echo "Cleaning previous public deployment folders..."
-            rm -rf "$FRONTEND_ROOT" "$API_ROOT"
-            mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
+            echo "TARGET_DIR=$TARGET_DIR"
+            echo "FRONTEND_ROOT=$FRONTEND_ROOT"
+            echo "API_ROOT=$API_ROOT"
 
-            BACKEND_SOURCE="$BACKEND_DIR"
-            FRONTEND_SOURCE="$FRONTEND_DIST"
-
-            if [ ! -d "$BACKEND_SOURCE" ] && [ -d "$TARGET_DIR/backend" ]; then
-              BACKEND_SOURCE="$TARGET_DIR/backend"
-            fi
-            if [ ! -d "$FRONTEND_SOURCE" ] && [ -d "$TARGET_DIR/frontend/dist" ]; then
-              FRONTEND_SOURCE="$TARGET_DIR/frontend/dist"
-            fi
-
-            if [ ! -d "$BACKEND_SOURCE" ]; then
-              echo "backend source directory not found after upload."
-              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
-              exit 1
-            fi
-            if [ ! -d "$FRONTEND_SOURCE" ]; then
-              echo "frontend build source directory not found after upload."
-              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+            if [ -z "$FRONTEND_ROOT" ] || [ "$FRONTEND_ROOT" = "/" ]; then
+              echo "Unsafe FRONTEND_ROOT"
               exit 1
             fi
 
-            echo "Resolved BACKEND_SOURCE=$BACKEND_SOURCE"
-            echo "Resolved FRONTEND_SOURCE=$FRONTEND_SOURCE"
+            if [ -z "$API_ROOT" ] || [ "$API_ROOT" = "/" ]; then
+              echo "Unsafe API_ROOT"
+              exit 1
+            fi
 
-            echo "Using CI-built dependencies and assets; skipping remote composer/npm."
-            echo "Syncing frontend build to web root: $FRONTEND_ROOT"
-            rsync -a --delete "$FRONTEND_SOURCE/" "$FRONTEND_ROOT/"
-            # rsync with --delete can remove generated directories (like api). Recreate API_ROOT after sync.
+            rm -rf "$API_ROOT"
+
+            mkdir -p "$FRONTEND_ROOT"
             mkdir -p "$API_ROOT"
 
-            # Create API .htaccess to route /api/* to API front controller
-            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
-            <IfModule mod_rewrite.c>
-              <IfModule mod_negotiation.c>
-                Options -MultiViews -Indexes
-              </IfModule>
+            echo "Deploying frontend..."
+            rsync -a --delete "$FRONTEND_SOURCE/" "$FRONTEND_ROOT/"
 
-              RewriteEngine On
+            mkdir -p "$API_ROOT"
 
-              RewriteCond %{HTTP:Authorization} .
-              RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-              RewriteCond %{HTTP:x-xsrf-token} .
-              RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]
-
-              RewriteCond %{REQUEST_FILENAME} !-d
-              RewriteCond %{REQUEST_URI} (.+)/$
-              RewriteRule ^ %1 [L,R=301]
-
-              RewriteCond %{REQUEST_FILENAME} !-d
-              RewriteCond %{REQUEST_FILENAME} !-f
-              RewriteRule ^ index.php [L]
-            </IfModule>
-            HTACCESS
-            sed -i 's/^            //' "$API_ROOT/.htaccess"
-            
-            # Create .htaccess for React SPA routing
-            # Create .htaccess for React SPA routing while excluding /api paths.
-            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
-            <IfModule mod_rewrite.c>
-              RewriteEngine On
-              RewriteBase /
-
-              # Serve existing files and directories directly
-              RewriteCond %{REQUEST_FILENAME} -f [OR]
-              RewriteCond %{REQUEST_FILENAME} -d
-              RewriteRule ^ - [L]
-
-              # Do not rewrite API requests to SPA fallback.
-              RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
-
-              # Fallback to index.html for client-side routes
-              RewriteRule ^ index.html [L]
-            </IfModule>
-            HTACCESS
-            sed -i 's/^            //' "$FRONTEND_ROOT/.htaccess"
-            
-            # Create API index.php that boots Laravel
-            # Create API bootstrap index.php (absolute backend paths)
-            cat > "$API_ROOT/index.php" <<'PHP'
-            <?php
-            use Illuminate\Foundation\Application;
-            use Illuminate\Http\Request;
-
-            define('LARAVEL_START', microtime(true));
-
-            // Absolute path to backend staging (resolved in deploy script)
-            $backendRoot = '__BACKEND_SOURCE__';
-
-            if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
-              require $maintenance;
-            }
-
-            require $backendRoot.'/vendor/autoload.php';
-
-            /** @var Application $app */
-            $app = require_once $backendRoot.'/bootstrap/app.php';
-            $app->handleRequest(Request::capture());
-            PHP
-            sed -i 's/^            //' "$API_ROOT/index.php"
-            sed -i "s#__BACKEND_SOURCE__#${BACKEND_SOURCE}#g" "$API_ROOT/index.php"
-
-            # Create a simple POST test endpoint to verify POSTs reach PHP
-            cat > "$API_ROOT/test_post.php" <<'PHP'
-            <?php
-            header('Content-Type: application/json');
-            echo json_encode([
-              'method' => $_SERVER['REQUEST_METHOD'],
-              'headers' => function_exists('getallheaders') ? getallheaders() : [],
-              'body' => file_get_contents('php://input'),
-            ]);
-            PHP
-            sed -i 's/^            //' "$API_ROOT/test_post.php"
-            
-            ln -sfn "$BACKEND_SOURCE/storage/app/public" "$API_ROOT"/storage
-            ls -la "$FRONTEND_ROOT"
-            ls -la "$API_ROOT"
-            ENV_PATH="$BACKEND_SOURCE/.env"
+            echo "Preserving any currently deployed .env if present..."
             if [ -f "$TARGET_DIR/backend/.env" ]; then
-              echo "Reusing existing remote backend .env from $TARGET_DIR/backend/.env"
-              cp "$TARGET_DIR/backend/.env" "$ENV_PATH"
+              cp "$TARGET_DIR/backend/.env" "$TARGET_DIR/.env.deployed.bak" || true
+              echo "Saved existing deployed .env to $TARGET_DIR/.env.deployed.bak"
+            fi
+
+            echo "Deploying backend..."
+            rsync -a --delete \
+              "$BACKEND_SOURCE/" \
+              "$TARGET_DIR/backend/"
+
+            BACKEND_SOURCE="$TARGET_DIR/backend"
+
+            echo "Creating API .htaccess..."
+
+            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ index.php [L]
+</IfModule>
+HTACCESS
+
+            echo "Creating SPA .htaccess..."
+
+            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
+
+  RewriteRule ^ index.html [L]
+</IfModule>
+HTACCESS
+
+            echo "Creating Laravel API bootstrap..."
+
+            cat > "$API_ROOT/index.php" <<PHP
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+\$backendRoot = '$BACKEND_SOURCE';
+
+if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
+    require \$maintenance;
+}
+
+require \$backendRoot.'/vendor/autoload.php';
+
+/** @var Application \$app */
+\$app = require_once \$backendRoot.'/bootstrap/app.php';
+
+\$app->handleRequest(Request::capture());
+PHP
+
+            echo "Creating API test endpoint..."
+
+            cat > "$API_ROOT/test_post.php" <<'PHP'
+<?php
+
+header('Content-Type: application/json');
+
+echo json_encode([
+    'method' => $_SERVER['REQUEST_METHOD'],
+    'body' => file_get_contents('php://input'),
+]);
+PHP
+
+            echo "Creating .env..."
+
+            ENV_PATH="$BACKEND_SOURCE/.env"
+
+            # Restore previously deployed .env if we saved one before overwriting
+            if [ -f "$TARGET_DIR/.env.deployed.bak" ]; then
+              cp "$TARGET_DIR/.env.deployed.bak" "$ENV_PATH" || true
+              echo "Restored deployed .env to $ENV_PATH"
+
+            # If an ENV_FILE secret was provided, use that
             elif [ -n "${{ secrets.ENV_FILE }}" ]; then
-              echo "Using ENV_FILE secret to populate backend .env"
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
+
             else
-              echo "No remote backend .env found in CI; creating production MySQL .env from known Hostinger database details."
+              # Seed a minimal production .env. Encourage providing a real ENV_FILE via secrets.
               cat > "$ENV_PATH" <<'ENVFILE'
-              APP_NAME="OMS v3.0"
-              APP_ENV=production
-              APP_KEY=base64:REPLACE_ME
-              APP_DEBUG=false
-              APP_URL=https://app.apnistationery.com
+APP_NAME="OMS v3.0"
+APP_ENV=production
+APP_KEY=base64:REPLACE_ME
+APP_DEBUG=false
+APP_URL=https://app.apnistationery.com
 
-              LOG_CHANNEL=stack
-              LOG_STACK=single
-              LOG_LEVEL=debug
+LOG_CHANNEL=stack
+LOG_STACK=single
+LOG_LEVEL=debug
 
-              DB_CONNECTION=mysql
-              DB_HOST=127.0.0.1
-              DB_PORT=3306
-              DB_DATABASE=u902868468_Apnistationery
-              DB_USERNAME=u902868468_Himanshuk18
-              DB_PASSWORD=
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=u902868468_Apnistationery
+DB_USERNAME=u902868468_Himanshuk18
+DB_PASSWORD=
 
-              SESSION_DRIVER=file
-              SESSION_LIFETIME=120
-              QUEUE_CONNECTION=sync
-              CACHE_STORE=file
-              else
-                echo "No remote backend .env found in CI; creating production MySQL .env from known Hostinger database details."
-                cat > "$ENV_PATH" <<'ENVFILE'
-  APP_NAME="OMS v3.0"
-  APP_ENV=production
-  APP_KEY=base64:REPLACE_ME
-  APP_DEBUG=false
-  APP_URL=https://app.apnistationery.com
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+QUEUE_CONNECTION=sync
+CACHE_STORE=file
+ENVFILE
 
-  LOG_CHANNEL=stack
-  LOG_STACK=single
-  LOG_LEVEL=debug
-
-  DB_CONNECTION=mysql
-  DB_HOST=127.0.0.1
-  DB_PORT=3306
-  DB_DATABASE=***_Apnistationery
-  DB_USERNAME=***_Himanshuk18
-  DB_PASSWORD=
-
-  SESSION_DRIVER=file
-  SESSION_LIFETIME=120
-  QUEUE_CONNECTION=sync
-  CACHE_STORE=file
-  ENVFILE
-              fi
-            echo "Detected DB_CONNECTION=${CURRENT_DB_CONNECTION:-unset}"
-            echo "Detected DB_DATABASE=${CURRENT_DB_DATABASE:-unset}"
+            fi
 
             if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
               APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+
               if grep -q '^APP_KEY=' "$ENV_PATH"; then
                 sed -i "s#^APP_KEY=.*#APP_KEY=$APP_KEY#" "$ENV_PATH"
               else
                 echo "APP_KEY=$APP_KEY" >> "$ENV_PATH"
               fi
             fi
-            sed -i 's/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' "$ENV_PATH"
-            sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
-            sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
-            PHP_BIN="/opt/alt/php84/usr/bin/php"
-            if [ ! -x "$PHP_BIN" ]; then
-              echo "Expected PHP 8.4 CLI not found at $PHP_BIN."
-              echo "Cannot run artisan clean commands safely."
-              exit 1
-            fi
-            PHP_VERSION_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION;')"
-            PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
-            echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
-            chown -R ${{ secrets.SSH_USER }}:www-data "$TARGET_DIR" || true
-            chmod -R 775 "$BACKEND_SOURCE/storage" "$BACKEND_SOURCE/bootstrap/cache" || true
-            if [ -f "$BACKEND_SOURCE/artisan" ]; then
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" optimize:clear || true
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" migrate --force --no-interaction
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
+
+            mkdir -p "$BACKEND_SOURCE/storage/framework/cache"
+            mkdir -p "$BACKEND_SOURCE/storage/framework/sessions"
+            mkdir -p "$BACKEND_SOURCE/storage/framework/views"
+            mkdir -p "$BACKEND_SOURCE/storage/logs"
+            mkdir -p "$BACKEND_SOURCE/bootstrap/cache"
+
+            chmod -R 775 "$BACKEND_SOURCE/storage" || true
+            chmod -R 775 "$BACKEND_SOURCE/bootstrap/cache" || true
+
+            if [ -L "$API_ROOT/storage" ]; then
+              rm -f "$API_ROOT/storage"
             fi
 
-      - name: Verify remote deployment
-        uses: appleboy/ssh-action@v0.1.7
+            ln -sfn \
+              "$BACKEND_SOURCE/storage/app/public" \
+              "$API_ROOT/storage" || true
+
+            PHP_BIN="/opt/alt/php84/usr/bin/php"
+
+            if [ ! -x "$PHP_BIN" ]; then
+              PHP_BIN=$(which php)
+            fi
+
+            echo "Using PHP binary: $PHP_BIN"
+
+            "$PHP_BIN" "$BACKEND_SOURCE/artisan" optimize:clear || true
+            # Decide whether to run migrations: only run when DB_CONNECTION=mysql and DB_PASSWORD is set
+            DB_CONN=$(grep -E '^DB_CONNECTION=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
+            DB_PASS=$(grep -E '^DB_PASSWORD=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
+
+            if [ "${DB_CONN:-}" = "mysql" ] && [ -n "$DB_PASS" ]; then
+              echo "Running migrations against MySQL"
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" migrate --force --no-interaction || true
+            else
+              echo "Skipping migrations: DB_CONNECTION='$DB_CONN' DB_PASSWORD set: $( [ -n "$DB_PASS" ] && echo yes || echo no )"
+            fi
+            "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
+            "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
+            "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
           port: ${{ env.SSH_PORT }}
@@ -370,51 +404,40 @@ jobs:
           command_timeout: 10m
           script: |
             set -e
-            echo "--- Listing public dir ---"
+
+            echo "=== PUBLIC ROOT ==="
             ls -la "${{ env.PUBLIC_DIR }}" || true
-            echo "--- Listing public/api dir ---"
+
+            echo "=== API ROOT ==="
             ls -la "${{ env.PUBLIC_DIR }}/api" || true
-            echo "--- Head of api/index.php ---"
-            if [ -f "${{ env.PUBLIC_DIR }}/api/index.php" ]; then
-              sed -n '1,80p' "${{ env.PUBLIC_DIR }}/api/index.php"
-            else
-              echo "api/index.php not found"
-            fi
-            echo "--- curl localhost/api/test_post ---"
-            curl -i --max-time 10 "http://127.0.0.1/api/test_post.php" || true
-            curl -i --max-time 10 "http://localhost/api/test_post.php" || true
-            echo "--- curl public domain api/test_post ---"
-            curl -i --max-time 10 "https://${{ env.DEPLOY_DOMAIN }}/api/test_post.php" || true
-            echo "--- curl public domain login route ---"
-            curl -i --max-time 10 -X POST "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" -H "Accept: application/json" -H "Content-Type: application/json" -d '{}' || true
 
-            echo "--- Additional diagnostics ---"
-            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
-            if [ -d "$TARGET_DIR/staging/backend" ]; then
-              BACKEND_SOURCE="$TARGET_DIR/staging/backend"
-            else
-              BACKEND_SOURCE="$TARGET_DIR/backend"
-            fi
-            echo "Resolved BACKEND_SOURCE=$BACKEND_SOURCE"
+            echo "=== API INDEX ==="
+            sed -n '1,80p' "${{ env.PUBLIC_DIR }}/api/index.php" || true
 
-            ENV_PATH="$BACKEND_SOURCE/.env"
-            echo "--- .env (masked) ---"
-            if [ -f "$ENV_PATH" ]; then
-              sed -n '1,200p' "$ENV_PATH" | sed -E 's/^(DB_PASSWORD=).*/\1[REDACTED]/'
-            else
-              echo "no .env found at $ENV_PATH"
-            fi
+            echo "=== TEST ENDPOINT ==="
+            curl -i --max-time 15 \
+              "https://${{ env.DEPLOY_DOMAIN }}/api/test_post.php" || true
 
-            echo "--- PHP CLI ---"
+            echo "=== LOGIN ENDPOINT ==="
+            curl -i --max-time 15 \
+              -X POST \
+              "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -d '{}' || true
+
+            echo "=== PHP VERSION ==="
             /opt/alt/php84/usr/bin/php -v || php -v || true
 
-            echo "--- Laravel log tail (last 200 lines per file) ---"
+            echo "=== STORAGE LOGS ==="
+
+            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
+            BACKEND_SOURCE="$TARGET_DIR/backend"
+
             if [ -d "$BACKEND_SOURCE/storage/logs" ]; then
               for f in "$BACKEND_SOURCE"/storage/logs/*.log; do
-                echo "--- LOG: $f ---"; tail -n 200 "$f" || true
+                echo "--- $f ---"
+                tail -n 100 "$f" || true
               done
-            else
-              echo "No storage/logs directory found"
             fi
-
-            echo "--- End diagnostics ---"
+```
