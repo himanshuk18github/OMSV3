@@ -7,6 +7,9 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/apps/oms', secrets.SSH_USER) }}
+      PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN) }}
 
     steps:
       - name: Checkout
@@ -63,18 +66,12 @@ jobs:
             echo "Missing required secret: SSH_PRIVATE_KEY"
             exit 1
           fi
-          if [ -z "${{ secrets.TARGET_DIR }}" ]; then
-            echo "Missing required secret: TARGET_DIR"
-            exit 1
-          fi
-          if [ -z "${{ secrets.PUBLIC_DIR }}" ]; then
-            echo "Missing required secret: PUBLIC_DIR"
-            exit 1
-          fi
           if [ -z "${{ secrets.DEPLOY_DOMAIN }}" ]; then
             echo "Missing required secret: DEPLOY_DOMAIN"
             exit 1
           fi
+          echo "Derived TARGET_DIR=${{ env.TARGET_DIR }}"
+          echo "Derived PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
 
       - name: Ensure remote directories (with connectivity test)
         run: |
@@ -94,8 +91,8 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
-            TARGET_DIR="${{ secrets.TARGET_DIR }}"
-            PUBLIC_DIR="${{ secrets.PUBLIC_DIR }}"
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
 
             if [ -z "$TARGET_DIR" ] || [ -z "$PUBLIC_DIR" ]; then
               echo "TARGET_DIR or PUBLIC_DIR is empty. Check repository secrets."
@@ -115,7 +112,7 @@ jobs:
           timeout: 120s
           command_timeout: 20m
           source: artifact.tar.gz
-          target: ${{ secrets.TARGET_DIR }}
+          target: ${{ env.TARGET_DIR }}
 
       - name: Deploy on remote
         uses: appleboy/ssh-action@v0.1.7
@@ -128,24 +125,24 @@ jobs:
           command_timeout: 30m
           script: |
             set -e
-            cd ${{ secrets.TARGET_DIR }}
+            cd ${{ env.TARGET_DIR }}
             ls -la
-            ARTIFACT_PATH="${{ secrets.TARGET_DIR }}/artifact.tar.gz"
+            ARTIFACT_PATH="${{ env.TARGET_DIR }}/artifact.tar.gz"
             if [ ! -f "$ARTIFACT_PATH" ]; then
-              ARTIFACT_PATH="$(find ${{ secrets.TARGET_DIR }} -type f -name 'artifact.tar.gz' | head -n 1)"
+              ARTIFACT_PATH="$(find ${{ env.TARGET_DIR }} -type f -name 'artifact.tar.gz' | head -n 1)"
             fi
             if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
-              echo "artifact.tar.gz not found under ${{ secrets.TARGET_DIR }}"
+              echo "artifact.tar.gz not found under ${{ env.TARGET_DIR }}"
               exit 1
             fi
-            tar -xzf "$ARTIFACT_PATH" -C ${{ secrets.TARGET_DIR }}
+            tar -xzf "$ARTIFACT_PATH" -C ${{ env.TARGET_DIR }}
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
-            FRONTEND_ROOT="${{ secrets.PUBLIC_DIR }}"
-            API_ROOT="${{ secrets.PUBLIC_DIR }}/api"
+            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
+            API_ROOT="${{ env.PUBLIC_DIR }}/api"
             # Ensure frontend root exists, sync the built SPA, then create API folder
             mkdir -p "$FRONTEND_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
-            rsync -av --delete "${{ secrets.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
+            rsync -av --delete "${{ env.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
             # Re-create API folder after rsync in case rsync --delete removed it
             mkdir -p "$API_ROOT"
 
@@ -206,8 +203,8 @@ jobs:
 
             define('LARAVEL_START', microtime(true));
 
-            // Absolute path to backend (set by GitHub Actions secret TARGET_DIR)
-            $backendRoot = '${{ secrets.TARGET_DIR }}/backend';
+            // Absolute path to backend (derived by workflow env TARGET_DIR)
+            $backendRoot = '${{ env.TARGET_DIR }}/backend';
 
             if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
               require $maintenance;
@@ -233,14 +230,14 @@ jobs:
             PHP
             sed -i 's/^            //' "$API_ROOT/test_post.php"
             
-            ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
+            ln -sfn ${{ env.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
             ls -la "$API_ROOT"
-            ENV_PATH="${{ secrets.TARGET_DIR }}/backend/.env"
+            ENV_PATH="${{ env.TARGET_DIR }}/backend/.env"
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
             elif [ ! -f "$ENV_PATH" ]; then
-              cp "${{ secrets.TARGET_DIR }}/backend/.env.example" "$ENV_PATH"
+              cp "${{ env.TARGET_DIR }}/backend/.env.example" "$ENV_PATH"
             fi
             if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
               APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
@@ -254,13 +251,13 @@ jobs:
             sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
             sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
             php -r 'if (PHP_VERSION_ID < 80300) { fwrite(STDERR, "WARNING: Server PHP ".PHP_VERSION." is below required 8.3 for this app.\n"); }'
-            chown -R ${{ secrets.SSH_USER }}:www-data ${{ secrets.TARGET_DIR }} || true
-            chmod -R 775 ${{ secrets.TARGET_DIR }}/backend/storage ${{ secrets.TARGET_DIR }}/backend/bootstrap/cache || true
-            if [ -f "${{ secrets.TARGET_DIR }}/backend/artisan" ]; then
-              php ${{ secrets.TARGET_DIR }}/backend/artisan optimize:clear || true
-              php ${{ secrets.TARGET_DIR }}/backend/artisan config:cache || true
-              php ${{ secrets.TARGET_DIR }}/backend/artisan route:cache || true
-              php ${{ secrets.TARGET_DIR }}/backend/artisan view:cache || true
+            chown -R ${{ secrets.SSH_USER }}:www-data ${{ env.TARGET_DIR }} || true
+            chmod -R 775 ${{ env.TARGET_DIR }}/backend/storage ${{ env.TARGET_DIR }}/backend/bootstrap/cache || true
+            if [ -f "${{ env.TARGET_DIR }}/backend/artisan" ]; then
+              php ${{ env.TARGET_DIR }}/backend/artisan optimize:clear || true
+              php ${{ env.TARGET_DIR }}/backend/artisan config:cache || true
+              php ${{ env.TARGET_DIR }}/backend/artisan route:cache || true
+              php ${{ env.TARGET_DIR }}/backend/artisan view:cache || true
             fi
 
       - name: Verify remote deployment
@@ -275,12 +272,12 @@ jobs:
           script: |
             set -e
             echo "--- Listing public dir ---"
-            ls -la "${{ secrets.PUBLIC_DIR }}" || true
+            ls -la "${{ env.PUBLIC_DIR }}" || true
             echo "--- Listing public/api dir ---"
-            ls -la "${{ secrets.PUBLIC_DIR }}/api" || true
+            ls -la "${{ env.PUBLIC_DIR }}/api" || true
             echo "--- Head of api/index.php ---"
-            if [ -f "${{ secrets.PUBLIC_DIR }}/api/index.php" ]; then
-              sed -n '1,80p' "${{ secrets.PUBLIC_DIR }}/api/index.php"
+            if [ -f "${{ env.PUBLIC_DIR }}/api/index.php" ]; then
+              sed -n '1,80p' "${{ env.PUBLIC_DIR }}/api/index.php"
             else
               echo "api/index.php not found"
             fi
