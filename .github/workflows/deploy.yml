@@ -1,4 +1,3 @@
-```yaml
 name: Build and Deploy
 
 on:
@@ -440,4 +439,3 @@ ENVFILE
                 tail -n 100 "$f" || true
               done
             fi
-```
