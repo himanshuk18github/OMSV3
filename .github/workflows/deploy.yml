@@ -93,8 +93,8 @@ jobs:
 
             mkdir -p "$TARGET_DIR"
             mkdir -p "$PUBLIC_DIR"
-            mkdir -p "$TARGET_DIR/backend"
-            mkdir -p "$TARGET_DIR/frontend/dist"
+            mkdir -p "$TARGET_DIR/staging/backend"
+            mkdir -p "$TARGET_DIR/staging/frontend/dist"
 
       - name: Upload backend and frontend build
         run: |
@@ -109,12 +109,12 @@ jobs:
           rsync -az --delete \
             -e "$RSYNC_SSH" \
             backend/ \
-            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/backend/"
+            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/backend/"
 
           rsync -az --delete \
             -e "$RSYNC_SSH" \
             frontend/dist/ \
-            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/frontend/dist/"
+            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/frontend/dist/"
 
       - name: Deploy on remote
         uses: appleboy/ssh-action@v0.1.7
@@ -128,20 +128,30 @@ jobs:
           script: |
             set -e
             TARGET_DIR="${{ env.TARGET_DIR }}"
-            BACKEND_DIR="$TARGET_DIR/backend"
-            FRONTEND_DIST="$TARGET_DIR/frontend/dist"
+            STAGING_DIR="$TARGET_DIR/staging"
+            BACKEND_DIR="$STAGING_DIR/backend"
+            FRONTEND_DIST="$STAGING_DIR/frontend/dist"
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
 
-            echo "Cleaning previous deployment folders..."
-            rm -rf "$BACKEND_DIR" "$TARGET_DIR/frontend" "$API_ROOT"
-            mkdir -p "$BACKEND_DIR" "$TARGET_DIR/frontend/dist" "$FRONTEND_ROOT" "$API_ROOT"
+            echo "Cleaning previous public deployment folders..."
+            rm -rf "$FRONTEND_ROOT" "$API_ROOT"
+            mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
+
+            if [ ! -d "$BACKEND_DIR" ]; then
+              echo "staging backend directory not found after upload."
+              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+              exit 1
+            fi
+            if [ ! -d "$FRONTEND_DIST" ]; then
+              echo "staging frontend/dist directory not found after upload."
+              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+              exit 1
+            fi
 
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
-            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
-            rsync -av --delete "$FRONTEND_DIST/" "$FRONTEND_ROOT/"
-            mkdir -p "$API_ROOT"
+            rsync -a --delete "$FRONTEND_DIST/" "$FRONTEND_ROOT/"
 
             # Create API .htaccess to route /api/* to API front controller
             cat > "$API_ROOT/.htaccess" <<'HTACCESS'
@@ -199,8 +209,8 @@ jobs:
 
             define('LARAVEL_START', microtime(true));
 
-            // Absolute path to backend (resolved in deploy script)
-            $backendRoot = '${{ env.TARGET_DIR }}/backend';
+            // Absolute path to backend staging (resolved in deploy script)
+            $backendRoot = '${{ env.TARGET_DIR }}/staging/backend';
 
             if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
               require $maintenance;
@@ -226,14 +236,14 @@ jobs:
             PHP
             sed -i 's/^            //' "$API_ROOT/test_post.php"
             
-            ln -sfn ${{ env.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
+            ln -sfn $BACKEND_DIR/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
             ls -la "$API_ROOT"
-            ENV_PATH="${{ env.TARGET_DIR }}/backend/.env"
+            ENV_PATH="$BACKEND_DIR/.env"
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
             elif [ ! -f "$ENV_PATH" ]; then
-              cp "${{ env.TARGET_DIR }}/backend/.env.example" "$ENV_PATH"
+              cp "$BACKEND_DIR/.env.example" "$ENV_PATH"
             fi
 
             # Enforce production-safe defaults.
@@ -304,13 +314,13 @@ jobs:
             PHP_VERSION_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION;')"
             PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
             echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
-            chown -R ${{ secrets.SSH_USER }}:www-data ${{ env.TARGET_DIR }} || true
-            chmod -R 775 ${{ env.TARGET_DIR }}/backend/storage ${{ env.TARGET_DIR }}/backend/bootstrap/cache || true
-            if [ -f "${{ env.TARGET_DIR }}/backend/artisan" ]; then
-              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan optimize:clear || true
-              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan config:cache || true
-              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan route:cache || true
-              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan view:cache || true
+            chown -R ${{ secrets.SSH_USER }}:www-data "$TARGET_DIR" || true
+            chmod -R 775 "$BACKEND_DIR/storage" "$BACKEND_DIR/bootstrap/cache" || true
+            if [ -f "$BACKEND_DIR/artisan" ]; then
+              "$PHP_BIN" "$BACKEND_DIR/artisan" optimize:clear || true
+              "$PHP_BIN" "$BACKEND_DIR/artisan" config:cache || true
+              "$PHP_BIN" "$BACKEND_DIR/artisan" route:cache || true
+              "$PHP_BIN" "$BACKEND_DIR/artisan" view:cache || true
             fi
 
       - name: Verify remote deployment
