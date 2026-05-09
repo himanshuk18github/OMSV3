@@ -16,6 +16,7 @@ jobs:
       SSH_PORT: 65002
       SSH_USER: u902868468468
       PUBLIC_DIR: /home/u902868468468/domains/app.apnistationery.com/public_html
+      TARGET_DIR: ~/app
 
     steps:
       - name: Checkout
@@ -56,6 +57,7 @@ jobs:
           npm run build
 
       - name: Start SSH Agent
+        if: ${{ secrets.SSH_PRIVATE_KEY != '' }}
         uses: webfactory/ssh-agent@v0.5.3
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -74,8 +76,8 @@ jobs:
             exit 1
           fi
 
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "Missing SSH_PRIVATE_KEY"
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ] && [ -z "${{ secrets.SSH_PASSWORD }}" ]; then
+            echo "Missing SSH auth: provide SSH_PRIVATE_KEY (preferred) or SSH_PASSWORD (fallback)"
             exit 1
           fi
 
@@ -84,43 +86,35 @@ jobs:
           echo "SSH_HOST=${{ env.SSH_HOST }}"
           echo "SSH_PORT=${{ env.SSH_PORT }}"
           echo "SSH_USER=${{ env.SSH_USER }}"
+          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
+            echo "SSH auth: password (fallback)"
+          else
+            echo "SSH auth: key"
+          fi
 
-      - name: Resolve remote app directory
-        id: resolve_remote_dir
+      - name: Test SSH connectivity
         run: |
           set -e
 
-          REMOTE_APP_DIR=$(
+          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
+            sudo apt-get update
+            sudo apt-get install -y sshpass
+            sshpass -p "${{ secrets.SSH_PASSWORD }}" \
+              ssh \
+                -o ConnectTimeout=10 \
+                -o StrictHostKeyChecking=no \
+                -p "${{ env.SSH_PORT }}" \
+                "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+                'echo SSH_OK'
+          else
             ssh \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o StrictHostKeyChecking=no \
               -p "${{ env.SSH_PORT }}" \
               "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-              '
-                for d in "$HOME/app" "$HOME/apps/oms" "$HOME/backend"; do
-                  if [ -d "$d" ]; then
-                    echo "$d"
-                    exit 0
-                  fi
-                done
-
-                echo "$HOME/app"
-              '
-          )
-
-          echo "Resolved remote app dir: $REMOTE_APP_DIR"
-          echo "target_dir=$REMOTE_APP_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Test SSH connectivity
-        run: |
-          ssh \
-            -o BatchMode=yes \
-            -o ConnectTimeout=10 \
-            -o StrictHostKeyChecking=no \
-            -p "${{ env.SSH_PORT }}" \
-            "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-            'echo SSH_OK'
+              'echo SSH_OK'
+          fi
 
       - name: Ensure remote directories
         uses: appleboy/ssh-action@v1.0.3
@@ -129,12 +123,13 @@ jobs:
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           timeout: 180s
           command_timeout: 20m
           script: |
             set -e
 
-            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
+            TARGET_DIR="$HOME/app"
             PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
 
             if [ -z "$TARGET_DIR" ]; then
@@ -160,16 +155,24 @@ jobs:
           SSH_PORT="${{ env.SSH_PORT }}"
           SSH_USER="${{ env.SSH_USER }}"
           SSH_HOST="${{ env.SSH_HOST }}"
-          TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
+          TARGET_DIR="${{ env.TARGET_DIR }}"
 
-          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
+            sudo apt-get update
+            sudo apt-get install -y sshpass
+            RSYNC="sshpass -p \"${{ secrets.SSH_PASSWORD }}\" rsync"
+            RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+          else
+            RSYNC="rsync"
+            RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+          fi
 
-          rsync -az --delete \
+          $RSYNC -az --delete \
             -e "$RSYNC_SSH" \
             backend/ \
             "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/backend/"
 
-          rsync -az --delete \
+          $RSYNC -az --delete \
             -e "$RSYNC_SSH" \
             frontend/dist/ \
             "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/frontend/dist/"
@@ -181,12 +184,13 @@ jobs:
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           timeout: 180s
           command_timeout: 30m
           script: |
             set -e
 
-            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
+            TARGET_DIR="$HOME/app"
             STAGING_DIR="$TARGET_DIR/staging"
 
             BACKEND_SOURCE="$STAGING_DIR/backend"
@@ -399,6 +403,7 @@ jobs:
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           timeout: 120s
           command_timeout: 10m
           script: |
@@ -430,7 +435,7 @@ jobs:
 
             echo "=== STORAGE LOGS ==="
 
-            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
+            TARGET_DIR="$HOME/app"
             BACKEND_SOURCE="$TARGET_DIR/backend"
 
             if [ -d "$BACKEND_SOURCE/storage/logs" ]; then
