@@ -138,20 +138,33 @@ jobs:
             rm -rf "$FRONTEND_ROOT" "$API_ROOT"
             mkdir -p "$FRONTEND_ROOT" "$API_ROOT"
 
-            if [ ! -d "$BACKEND_DIR" ]; then
-              echo "staging backend directory not found after upload."
+            BACKEND_SOURCE="$BACKEND_DIR"
+            FRONTEND_SOURCE="$FRONTEND_DIST"
+
+            if [ ! -d "$BACKEND_SOURCE" ] && [ -d "$TARGET_DIR/backend" ]; then
+              BACKEND_SOURCE="$TARGET_DIR/backend"
+            fi
+            if [ ! -d "$FRONTEND_SOURCE" ] && [ -d "$TARGET_DIR/frontend/dist" ]; then
+              FRONTEND_SOURCE="$TARGET_DIR/frontend/dist"
+            fi
+
+            if [ ! -d "$BACKEND_SOURCE" ]; then
+              echo "backend source directory not found after upload."
               find "$TARGET_DIR" -maxdepth 4 -type d -print || true
               exit 1
             fi
-            if [ ! -d "$FRONTEND_DIST" ]; then
-              echo "staging frontend/dist directory not found after upload."
+            if [ ! -d "$FRONTEND_SOURCE" ]; then
+              echo "frontend build source directory not found after upload."
               find "$TARGET_DIR" -maxdepth 4 -type d -print || true
               exit 1
             fi
 
+            echo "Resolved BACKEND_SOURCE=$BACKEND_SOURCE"
+            echo "Resolved FRONTEND_SOURCE=$FRONTEND_SOURCE"
+
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
-            rsync -a --delete "$FRONTEND_DIST/" "$FRONTEND_ROOT/"
+            rsync -a --delete "$FRONTEND_SOURCE/" "$FRONTEND_ROOT/"
 
             # Create API .htaccess to route /api/* to API front controller
             cat > "$API_ROOT/.htaccess" <<'HTACCESS'
@@ -210,7 +223,7 @@ jobs:
             define('LARAVEL_START', microtime(true));
 
             // Absolute path to backend staging (resolved in deploy script)
-            $backendRoot = '${{ env.TARGET_DIR }}/staging/backend';
+            $backendRoot = '__BACKEND_SOURCE__';
 
             if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
               require $maintenance;
@@ -223,6 +236,7 @@ jobs:
             $app->handleRequest(Request::capture());
             PHP
             sed -i 's/^            //' "$API_ROOT/index.php"
+            sed -i "s#__BACKEND_SOURCE__#${BACKEND_SOURCE}#g" "$API_ROOT/index.php"
 
             # Create a simple POST test endpoint to verify POSTs reach PHP
             cat > "$API_ROOT/test_post.php" <<'PHP'
@@ -236,14 +250,14 @@ jobs:
             PHP
             sed -i 's/^            //' "$API_ROOT/test_post.php"
             
-            ln -sfn $BACKEND_DIR/storage/app/public "$API_ROOT"/storage
+            ln -sfn "$BACKEND_SOURCE/storage/app/public" "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
             ls -la "$API_ROOT"
-            ENV_PATH="$BACKEND_DIR/.env"
+            ENV_PATH="$BACKEND_SOURCE/.env"
             if [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
             elif [ ! -f "$ENV_PATH" ]; then
-              cp "$BACKEND_DIR/.env.example" "$ENV_PATH"
+              cp "$BACKEND_SOURCE/.env.example" "$ENV_PATH"
             fi
 
             # Enforce production-safe defaults.
@@ -315,12 +329,12 @@ jobs:
             PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
             echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
             chown -R ${{ secrets.SSH_USER }}:www-data "$TARGET_DIR" || true
-            chmod -R 775 "$BACKEND_DIR/storage" "$BACKEND_DIR/bootstrap/cache" || true
-            if [ -f "$BACKEND_DIR/artisan" ]; then
-              "$PHP_BIN" "$BACKEND_DIR/artisan" optimize:clear || true
-              "$PHP_BIN" "$BACKEND_DIR/artisan" config:cache || true
-              "$PHP_BIN" "$BACKEND_DIR/artisan" route:cache || true
-              "$PHP_BIN" "$BACKEND_DIR/artisan" view:cache || true
+            chmod -R 775 "$BACKEND_SOURCE/storage" "$BACKEND_SOURCE/bootstrap/cache" || true
+            if [ -f "$BACKEND_SOURCE/artisan" ]; then
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" optimize:clear || true
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
             fi
 
       - name: Verify remote deployment
