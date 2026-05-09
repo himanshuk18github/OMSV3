@@ -279,34 +279,63 @@ jobs:
               echo "APP_URL=https://${{ env.DEPLOY_DOMAIN }}" >> "$ENV_PATH"
             fi
 
-            # If DB is still sqlite (default from .env.example), switch to the known production MySQL defaults.
+            # Handle DB configuration: prefer MySQL only if DB secrets provided; otherwise ensure SQLite file exists.
             CURRENT_DB_CONNECTION="$(grep '^DB_CONNECTION=' "$ENV_PATH" | tail -n 1 | cut -d'=' -f2-)"
             if [ "$CURRENT_DB_CONNECTION" = "sqlite" ]; then
-              sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' "$ENV_PATH"
-              if grep -q '^DB_HOST=' "$ENV_PATH"; then
-                sed -i 's/^DB_HOST=.*/DB_HOST=127.0.0.1/' "$ENV_PATH"
+              if [ -n "${{ secrets.DB_PASSWORD }}" ] || [ -n "${{ secrets.DB_HOST }}" ]; then
+                echo "DB secrets present — switching to MySQL defaults and applying provided secrets"
+                sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' "$ENV_PATH"
+                if grep -q '^DB_HOST=' "$ENV_PATH"; then
+                  sed -i 's/^DB_HOST=.*/DB_HOST=${{ secrets.DB_HOST || '127.0.0.1' }}/' "$ENV_PATH"
+                else
+                  echo "DB_HOST=${{ secrets.DB_HOST || '127.0.0.1' }}" >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_PORT=' "$ENV_PATH"; then
+                  sed -i 's/^DB_PORT=.*/DB_PORT=${{ secrets.DB_PORT || '3306' }}/' "$ENV_PATH"
+                else
+                  echo "DB_PORT=${{ secrets.DB_PORT || '3306' }}" >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_DATABASE=' "$ENV_PATH"; then
+                  sed -i 's/^DB_DATABASE=.*/DB_DATABASE=${{ secrets.DB_DATABASE || 'oms_v3' }}/' "$ENV_PATH"
+                else
+                  echo "DB_DATABASE=${{ secrets.DB_DATABASE || 'oms_v3' }}" >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_USERNAME=' "$ENV_PATH"; then
+                  sed -i 's/^DB_USERNAME=.*/DB_USERNAME=${{ secrets.DB_USERNAME || 'root' }}/' "$ENV_PATH"
+                else
+                  echo "DB_USERNAME=${{ secrets.DB_USERNAME || 'root' }}" >> "$ENV_PATH"
+                fi
+                # Apply DB_PASSWORD only if provided; otherwise leave empty and warn.
+                if [ -n "${{ secrets.DB_PASSWORD }}" ]; then
+                  if grep -q '^DB_PASSWORD=' "$ENV_PATH"; then
+                    sed -i "s#^DB_PASSWORD=.*#DB_PASSWORD=${{ secrets.DB_PASSWORD }}#" "$ENV_PATH"
+                  else
+                    echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$ENV_PATH"
+                  fi
+                else
+                  if ! grep -q '^DB_PASSWORD=' "$ENV_PATH"; then
+                    echo "DB_PASSWORD=" >> "$ENV_PATH"
+                  fi
+                  echo "Warning: DB_PASSWORD not set — database connectivity may fail."
+                fi
               else
-                echo 'DB_HOST=127.0.0.1' >> "$ENV_PATH"
-              fi
-              if grep -q '^DB_PORT=' "$ENV_PATH"; then
-                sed -i 's/^DB_PORT=.*/DB_PORT=3306/' "$ENV_PATH"
-              else
-                echo 'DB_PORT=3306' >> "$ENV_PATH"
-              fi
-              if grep -q '^DB_DATABASE=' "$ENV_PATH"; then
-                sed -i 's/^DB_DATABASE=.*/DB_DATABASE=oms_v3/' "$ENV_PATH"
-              else
-                echo 'DB_DATABASE=oms_v3' >> "$ENV_PATH"
-              fi
-              if grep -q '^DB_USERNAME=' "$ENV_PATH"; then
-                sed -i 's/^DB_USERNAME=.*/DB_USERNAME=root/' "$ENV_PATH"
-              else
-                echo 'DB_USERNAME=root' >> "$ENV_PATH"
-              fi
-              if grep -q '^DB_PASSWORD=' "$ENV_PATH"; then
-                sed -i "s#^DB_PASSWORD=.*#DB_PASSWORD=${{ secrets.DB_PASSWORD }}#" "$ENV_PATH"
-              else
-                echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$ENV_PATH"
+                echo "No DB secrets provided — using SQLite and ensuring database file exists."
+                # Ensure database directory and sqlite file exist to avoid QueryException
+                DB_DIR="$BACKEND_SOURCE/database"
+                mkdir -p "$DB_DIR"
+                SQLITE_FILE="$DB_DIR/database.sqlite"
+                if [ ! -f "$SQLITE_FILE" ]; then
+                  touch "$SQLITE_FILE"
+                  chmod 664 "$SQLITE_FILE" || true
+                  chown ${{ secrets.SSH_USER }}:www-data "$SQLITE_FILE" || true
+                fi
+                # Ensure env points to sqlite
+                sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=sqlite/' "$ENV_PATH"
+                if grep -q '^DB_DATABASE=' "$ENV_PATH"; then
+                  sed -i 's/^DB_DATABASE=.*/DB_DATABASE='"$SQLITE_FILE"'/' "$ENV_PATH"
+                else
+                  echo "DB_DATABASE=$SQLITE_FILE" >> "$ENV_PATH"
+                fi
               fi
             fi
 
