@@ -236,6 +236,61 @@ jobs:
             elif [ ! -f "$ENV_PATH" ]; then
               cp "${{ env.TARGET_DIR }}/backend/.env.example" "$ENV_PATH"
             fi
+
+            # Enforce production-safe defaults.
+            if grep -q '^APP_ENV=' "$ENV_PATH"; then
+              sed -i 's/^APP_ENV=.*/APP_ENV=production/' "$ENV_PATH"
+            else
+              echo 'APP_ENV=production' >> "$ENV_PATH"
+            fi
+            if grep -q '^APP_DEBUG=' "$ENV_PATH"; then
+              sed -i 's/^APP_DEBUG=.*/APP_DEBUG=false/' "$ENV_PATH"
+            else
+              echo 'APP_DEBUG=false' >> "$ENV_PATH"
+            fi
+            if grep -q '^APP_URL=' "$ENV_PATH"; then
+              sed -i "s#^APP_URL=.*#APP_URL=https://${{ env.DEPLOY_DOMAIN }}#" "$ENV_PATH"
+            else
+              echo "APP_URL=https://${{ env.DEPLOY_DOMAIN }}" >> "$ENV_PATH"
+            fi
+
+            # If DB is still sqlite (default from .env.example), auto-switch to MySQL when DB_PASSWORD is provided.
+            CURRENT_DB_CONNECTION="$(grep '^DB_CONNECTION=' "$ENV_PATH" | tail -n 1 | cut -d'=' -f2-)"
+            if [ "$CURRENT_DB_CONNECTION" = "sqlite" ]; then
+              if [ -n "${{ secrets.DB_PASSWORD }}" ]; then
+                sed -i 's/^DB_CONNECTION=.*/DB_CONNECTION=mysql/' "$ENV_PATH"
+                if grep -q '^DB_HOST=' "$ENV_PATH"; then
+                  sed -i 's/^DB_HOST=.*/DB_HOST=localhost/' "$ENV_PATH"
+                else
+                  echo 'DB_HOST=localhost' >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_PORT=' "$ENV_PATH"; then
+                  sed -i 's/^DB_PORT=.*/DB_PORT=3306/' "$ENV_PATH"
+                else
+                  echo 'DB_PORT=3306' >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_DATABASE=' "$ENV_PATH"; then
+                  sed -i "s/^DB_DATABASE=.*/DB_DATABASE=${{ secrets.SSH_USER }}_omsv2/" "$ENV_PATH"
+                else
+                  echo "DB_DATABASE=${{ secrets.SSH_USER }}_omsv2" >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_USERNAME=' "$ENV_PATH"; then
+                  sed -i "s/^DB_USERNAME=.*/DB_USERNAME=${{ secrets.SSH_USER }}/" "$ENV_PATH"
+                else
+                  echo "DB_USERNAME=${{ secrets.SSH_USER }}" >> "$ENV_PATH"
+                fi
+                if grep -q '^DB_PASSWORD=' "$ENV_PATH"; then
+                  sed -i "s#^DB_PASSWORD=.*#DB_PASSWORD=${{ secrets.DB_PASSWORD }}#" "$ENV_PATH"
+                else
+                  echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> "$ENV_PATH"
+                fi
+              else
+                echo "Deployment blocked: .env is configured for sqlite and DB_PASSWORD secret is missing."
+                echo "Set either ENV_FILE secret with full production .env OR set DB_PASSWORD secret for auto mysql config."
+                exit 1
+              fi
+            fi
+
             if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
               APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
               if grep -q '^APP_KEY=' "$ENV_PATH"; then
@@ -279,7 +334,9 @@ jobs:
               echo "api/index.php not found"
             fi
             echo "--- curl localhost/api/test_post ---"
-            curl -i --max-time 10 "http://127.0.0.1/api/test_post" || true
-            curl -i --max-time 10 "http://localhost/api/test_post" || true
+            curl -i --max-time 10 "http://127.0.0.1/api/test_post.php" || true
+            curl -i --max-time 10 "http://localhost/api/test_post.php" || true
             echo "--- curl public domain api/test_post ---"
-            curl -i --max-time 10 "https://${{ env.DEPLOY_DOMAIN }}/api/test_post" || true
+            curl -i --max-time 10 "https://${{ env.DEPLOY_DOMAIN }}/api/test_post.php" || true
+            echo "--- curl public domain login route ---"
+            curl -i --max-time 10 -X POST "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" -H "Accept: application/json" -H "Content-Type: application/json" -d '{}' || true
