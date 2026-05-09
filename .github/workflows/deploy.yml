@@ -305,14 +305,20 @@ jobs:
             sed -i 's/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' "$ENV_PATH"
             sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
             sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
-            php -r 'if (PHP_VERSION_ID < 80300) { fwrite(STDERR, "WARNING: Server PHP ".PHP_VERSION." is below required 8.3 for this app.\n"); }'
+            PHP_BIN="$(command -v php8.4 || command -v ea-php84 || command -v php)"
+            PHP_VERSION_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION;')"
+            PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
+            echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
+            if [ "$PHP_VERSION_ID_OUTPUT" -lt 80300 ]; then
+              echo "Warning: remote CLI PHP is below 8.3; this app requires 8.3+ for artisan commands."
+            fi
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ env.TARGET_DIR }} || true
             chmod -R 775 ${{ env.TARGET_DIR }}/backend/storage ${{ env.TARGET_DIR }}/backend/bootstrap/cache || true
             if [ -f "${{ env.TARGET_DIR }}/backend/artisan" ]; then
-              php ${{ env.TARGET_DIR }}/backend/artisan optimize:clear || true
-              php ${{ env.TARGET_DIR }}/backend/artisan config:cache || true
-              php ${{ env.TARGET_DIR }}/backend/artisan route:cache || true
-              php ${{ env.TARGET_DIR }}/backend/artisan view:cache || true
+              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan optimize:clear || true
+              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan config:cache || true
+              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan route:cache || true
+              "$PHP_BIN" ${{ env.TARGET_DIR }}/backend/artisan view:cache || true
             fi
 
       - name: Verify remote deployment
