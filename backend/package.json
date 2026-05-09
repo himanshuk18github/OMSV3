@@ -4,11 +4,14 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "start": "php artisan serve --host=0.0.0.0 --port=${PORT:-8000}",
+        "start:worker": "php artisan queue:work --tries=3 --timeout=120 --sleep=3",
+        "start:scheduler": "php artisan schedule:work"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
-        "axios": ">=1.11.0 <=1.14.0"
+        "axios": ">=1.11.0 <=1.14.0",
         "concurrently": "^9.0.1",
         "laravel-vite-plugin": "^3.0.0",
         "tailwindcss": "^4.0.0",
