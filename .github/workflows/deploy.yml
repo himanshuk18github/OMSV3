@@ -224,3 +224,30 @@ jobs:
               php ${{ secrets.TARGET_DIR }}/backend/artisan route:cache || true
               php ${{ secrets.TARGET_DIR }}/backend/artisan view:cache || true
             fi
+
+      - name: Verify remote deployment
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set -e
+            echo "--- Listing public dir ---"
+            ls -la "${{ secrets.PUBLIC_DIR }}" || true
+            echo "--- Listing public/api dir ---"
+            ls -la "${{ secrets.PUBLIC_DIR }}/api" || true
+            echo "--- Head of api/index.php ---"
+            if [ -f "${{ secrets.PUBLIC_DIR }}/api/index.php" ]; then
+              sed -n '1,80p' "${{ secrets.PUBLIC_DIR }}/api/index.php"
+            else
+              echo "api/index.php not found"
+            fi
+            echo "--- curl localhost/api/test_post ---"
+            curl -i --max-time 10 "http://127.0.0.1/api/test_post" || true
+            curl -i --max-time 10 "http://localhost/api/test_post" || true
+            echo "--- curl public domain api/test_post ---"
+            curl -i --max-time 10 "https://${{ secrets.DEPLOY_DOMAIN }}/api/test_post" || true
