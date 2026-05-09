@@ -14,9 +14,9 @@ jobs:
       DEPLOY_DOMAIN: app.apnistationery.com
       SSH_HOST: 82.112.232.23
       SSH_PORT: 65002
-      SSH_USER: u902868468468
-      PUBLIC_DIR: /home/u902868468468/domains/app.apnistationery.com/public_html
-      TARGET_DIR: /home/u902868468468/app
+      SSH_USER: u902868468
+      PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
+      TARGET_DIR: /home/u902868468/app
 
     steps:
       - name: Checkout
