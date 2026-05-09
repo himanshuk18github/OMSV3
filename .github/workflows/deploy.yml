@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN || 'app.apnistationery.com' }}
-      TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/app', secrets.SSH_USER) }}
+      TARGET_DIR: ${{ secrets.TARGET_DIR || '' }}
       PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN || 'app.apnistationery.com') }}
       SSH_HOST: ${{ secrets.SSH_HOST || '82.112.232.23' }}
       SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
@@ -71,6 +71,14 @@ jobs:
           echo "Using SSH_PORT=${{ env.SSH_PORT }}"
           echo "Using SSH_USER=${{ env.SSH_USER }}"
 
+      - name: Resolve remote app directory
+        id: resolve_remote_dir
+        run: |
+          set -e
+          REMOTE_APP_DIR="$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" 'for d in "$HOME/app" "$HOME/apps/oms" "$HOME/backend"; do if [ -d "$d" ]; then echo "$d"; exit 0; fi; done; echo "$HOME/app"')"
+          echo "Resolved remote app dir: $REMOTE_APP_DIR"
+          echo "target_dir=$REMOTE_APP_DIR" >> "$GITHUB_OUTPUT"
+
       - name: Ensure remote directories (with connectivity test)
         run: |
           echo "Testing SSH connectivity to ${{ env.SSH_HOST }}:${{ env.SSH_PORT }} as ${{ env.SSH_USER }}"
@@ -89,7 +97,7 @@ jobs:
           command_timeout: 20m
           script: |
             set -e
-            TARGET_DIR="${{ env.TARGET_DIR }}"
+            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
             PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
 
             if [ -z "$TARGET_DIR" ] || [ -z "$PUBLIC_DIR" ]; then
@@ -108,7 +116,7 @@ jobs:
           SSH_PORT="${{ secrets.SSH_PORT || '65002' }}"
           SSH_USER="${{ secrets.SSH_USER }}"
           SSH_HOST="${{ secrets.SSH_HOST }}"
-          TARGET_DIR="${{ env.TARGET_DIR }}"
+          TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
 
           RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
@@ -133,7 +141,7 @@ jobs:
           command_timeout: 30m
           script: |
             set -e
-            TARGET_DIR="${{ env.TARGET_DIR }}"
+            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
             STAGING_DIR="$TARGET_DIR/staging"
             BACKEND_DIR="$STAGING_DIR/backend"
             FRONTEND_DIST="$STAGING_DIR/frontend/dist"
@@ -351,9 +359,9 @@ ENVFILE
       - name: Verify remote deployment
         uses: appleboy/ssh-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '65002' }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
           command_timeout: 10m
@@ -378,7 +386,7 @@ ENVFILE
             curl -i --max-time 10 -X POST "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" -H "Accept: application/json" -H "Content-Type: application/json" -d '{}' || true
 
             echo "--- Additional diagnostics ---"
-            TARGET_DIR="${{ env.TARGET_DIR }}"
+            TARGET_DIR="${{ steps.resolve_remote_dir.outputs.target_dir }}"
             if [ -d "$TARGET_DIR/staging/backend" ]; then
               BACKEND_SOURCE="$TARGET_DIR/staging/backend"
             else
