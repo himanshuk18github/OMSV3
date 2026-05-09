@@ -114,58 +114,61 @@ jobs:
             # Create .htaccess for React SPA routing
             # Create .htaccess for React SPA routing but exclude /api so API PHP scripts receive requests
             cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteBase /
+            <IfModule mod_rewrite.c>
+              RewriteEngine On
+              RewriteBase /
 
-  # If the request targets the api folder, route to the API bootstrap
-  RewriteCond %{REQUEST_URI} ^/api [NC]
-  RewriteRule ^api/?(.*)$ /api/index.php [L,QSA]
+              # If the request targets the api folder, route to the API bootstrap
+              RewriteCond %{REQUEST_URI} ^/api [NC]
+              RewriteRule ^api/?(.*)$ /api/index.php [L,QSA]
 
-  # Serve existing files and directories directly
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
-  RewriteRule ^ - [L]
+              # Serve existing files and directories directly
+              RewriteCond %{REQUEST_FILENAME} -f [OR]
+              RewriteCond %{REQUEST_FILENAME} -d
+              RewriteRule ^ - [L]
 
-  # Fallback to index.html for client-side routes
-  RewriteRule ^ index.html [L]
-</IfModule>
-HTACCESS
+              # Fallback to index.html for client-side routes
+              RewriteRule ^ index.html [L]
+            </IfModule>
+            HTACCESS
+            sed -i 's/^            //' "$FRONTEND_ROOT/.htaccess"
             
             # Create API index.php that boots Laravel
             # Create API bootstrap index.php (absolute backend paths)
             cat > "$API_ROOT/index.php" <<'PHP'
-      <?php
-      define('LARAVEL_START', microtime(true));
+            <?php
+            define('LARAVEL_START', microtime(true));
 
-      // Absolute path to backend (set by GitHub Actions secret TARGET_DIR)
-      $backendRoot = '${{ secrets.TARGET_DIR }}/backend';
+            // Absolute path to backend (set by GitHub Actions secret TARGET_DIR)
+            $backendRoot = '${{ secrets.TARGET_DIR }}/backend';
 
-      if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
-        require $maintenance;
-      }
+            if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
+              require $maintenance;
+            }
 
-      require $backendRoot.'/vendor/autoload.php';
-      $app = require_once $backendRoot.'/bootstrap/app.php';
+            require $backendRoot.'/vendor/autoload.php';
+            $app = require_once $backendRoot.'/bootstrap/app.php';
 
-      $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
+            $kernel = $app->make(Illuminate\Contracts\Http\Kernel::class);
 
-      $request = Illuminate\Http\Request::capture();
-      $response = $kernel->handle($request);
-      $response->send();
-      $kernel->terminate($request, $response);
-      PHP
+            $request = Illuminate\Http\Request::capture();
+            $response = $kernel->handle($request);
+            $response->send();
+            $kernel->terminate($request, $response);
+            PHP
+            sed -i 's/^            //' "$API_ROOT/index.php"
 
             # Create a simple POST test endpoint to verify POSTs reach PHP
             cat > "$API_ROOT/test_post.php" <<'PHP'
-<?php
-header('Content-Type: application/json');
-echo json_encode([
-  'method' => $_SERVER['REQUEST_METHOD'],
-  'headers' => function_exists('getallheaders') ? getallheaders() : [],
-  'body' => file_get_contents('php://input'),
-]);
-PHP
+            <?php
+            header('Content-Type: application/json');
+            echo json_encode([
+              'method' => $_SERVER['REQUEST_METHOD'],
+              'headers' => function_exists('getallheaders') ? getallheaders() : [],
+              'body' => file_get_contents('php://input'),
+            ]);
+            PHP
+            sed -i 's/^            //' "$API_ROOT/test_post.php"
             
             ln -sfn ${{ secrets.TARGET_DIR }}/backend/storage/app/public "$API_ROOT"/storage
             ls -la "$FRONTEND_ROOT"
