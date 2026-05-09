@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - clean-backend-frontend
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -15,12 +16,22 @@ jobs:
       SSH_HOST: 82.112.232.23
       SSH_PORT: 65002
       SSH_USER: u902868468
-      PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
       TARGET_DIR: /home/u902868468/app
+      PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
+      PHP_BIN: /opt/alt/php84/usr/bin/php
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate repository structure
+        run: |
+          set -e
+          test -f backend/composer.json || { echo "Missing backend/composer.json"; exit 1; }
+          test -f frontend/package.json || { echo "Missing frontend/package.json"; exit 1; }
+          test "$DEPLOY_DOMAIN" = "app.apnistationery.com" || { echo "Unsafe DEPLOY_DOMAIN"; exit 1; }
+          test "$TARGET_DIR" = "/home/u902868468/app" || { echo "Unsafe TARGET_DIR"; exit 1; }
+          test "$PUBLIC_DIR" = "/home/u902868468/domains/app.apnistationery.com/public_html" || { echo "Unsafe PUBLIC_DIR"; exit 1; }
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -53,305 +64,96 @@ jobs:
           else
             npm install --legacy-peer-deps
           fi
-
           npm run build
 
       - name: Start SSH Agent
-        if: ${{ secrets.SSH_PRIVATE_KEY != '' }}
         uses: webfactory/ssh-agent@v0.5.3
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Validate deployment secrets
+      - name: Ensure remote app directories
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o StrictHostKeyChecking=no \
+            -p "${{ env.SSH_PORT }}" \
+            "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+            "mkdir -p '${{ env.TARGET_DIR }}/staging/backend' '${{ env.TARGET_DIR }}/staging/frontend_dist' '${{ env.TARGET_DIR }}/staging/api' '${{ env.TARGET_DIR }}/backups' '${{ env.PUBLIC_DIR }}/api'"
+
+      - name: Upload backend and frontend to staging
         run: |
           set -e
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${{ env.SSH_PORT }}"
+          rsync -az --delete -e "$RSYNC_SSH" backend/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/backend/"
+          rsync -az --delete -e "$RSYNC_SSH" frontend/dist/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/frontend_dist/"
 
-          if [ -z "${{ env.SSH_HOST }}" ]; then
-            echo "Missing SSH_HOST"
-            exit 1
-          fi
-
-          if [ -z "${{ env.SSH_USER }}" ]; then
-            echo "Missing SSH_USER"
-            exit 1
-          fi
-
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ] && [ -z "${{ secrets.SSH_PASSWORD }}" ]; then
-            echo "Missing SSH auth: provide SSH_PRIVATE_KEY (preferred) or SSH_PASSWORD (fallback)"
-            exit 1
-          fi
-
-          echo "DEPLOY_DOMAIN=${{ env.DEPLOY_DOMAIN }}"
-          echo "PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
-          echo "SSH_HOST=${{ env.SSH_HOST }}"
-          echo "SSH_PORT=${{ env.SSH_PORT }}"
-          echo "SSH_USER=${{ env.SSH_USER }}"
-          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
-            echo "SSH auth: password (fallback)"
-          else
-            echo "SSH auth: key"
-          fi
-
-      - name: Test SSH connectivity
-        run: |
-          set -e
-
-          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
-            sudo apt-get update
-            sudo apt-get install -y sshpass
-            sshpass -p "${{ secrets.SSH_PASSWORD }}" \
-              ssh \
-                -o ConnectTimeout=10 \
-                -o StrictHostKeyChecking=no \
-                -p "${{ env.SSH_PORT }}" \
-                "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-                'echo SSH_OK'
-          else
-            ssh \
-              -o BatchMode=yes \
-              -o ConnectTimeout=10 \
-              -o StrictHostKeyChecking=no \
-              -p "${{ env.SSH_PORT }}" \
-              "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-              'echo SSH_OK'
-          fi
-
-      - name: Ensure remote directories
+      - name: Prepare backend and staged API on remote
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          timeout: 180s
-          command_timeout: 20m
-          script: |
-            set -e
-
-            TARGET_DIR="$HOME/app"
-            PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
-
-            if [ -z "$TARGET_DIR" ]; then
-              echo "TARGET_DIR is empty"
-              exit 1
-            fi
-
-            if [ -z "$PUBLIC_DIR" ]; then
-              echo "PUBLIC_DIR is empty"
-              exit 1
-            fi
-
-            mkdir -p "$TARGET_DIR"
-            mkdir -p "$PUBLIC_DIR"
-
-            mkdir -p "$TARGET_DIR/staging/backend"
-            mkdir -p "$TARGET_DIR/staging/frontend/dist"
-
-      - name: Upload backend and frontend build
-        run: |
-          set -e
-
-          SSH_PORT="${{ env.SSH_PORT }}"
-          SSH_USER="${{ env.SSH_USER }}"
-          SSH_HOST="${{ env.SSH_HOST }}"
-          TARGET_DIR="${{ env.TARGET_DIR }}"
-
-          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
-            sudo apt-get update
-            sudo apt-get install -y sshpass
-            RSYNC="sshpass -p \"${{ secrets.SSH_PASSWORD }}\" rsync"
-            RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
-          else
-            RSYNC="rsync"
-            RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
-          fi
-
-          $RSYNC -az --delete \
-            -e "$RSYNC_SSH" \
-            backend/ \
-            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/backend/"
-
-          $RSYNC -az --delete \
-            -e "$RSYNC_SSH" \
-            frontend/dist/ \
-            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/staging/frontend/dist/"
-
-      - name: Deploy on remote
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.SSH_HOST }}
-          port: ${{ env.SSH_PORT }}
-          username: ${{ env.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          password: ${{ secrets.SSH_PASSWORD }}
           timeout: 180s
           command_timeout: 30m
           script: |
             set -e
 
-            TARGET_DIR="$HOME/app"
-            STAGING_DIR="$TARGET_DIR/staging"
-
-            BACKEND_SOURCE="$STAGING_DIR/backend"
-            FRONTEND_SOURCE="$STAGING_DIR/frontend/dist"
-
-            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
-            API_ROOT="${{ env.PUBLIC_DIR }}/api"
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
+            BACKEND_SOURCE="$TARGET_DIR/staging/backend"
             STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
             STAGED_API="$TARGET_DIR/staging/api"
+            BACKEND_LIVE="$TARGET_DIR/backend"
 
-            echo "TARGET_DIR=$TARGET_DIR"
-            echo "FRONTEND_ROOT=$FRONTEND_ROOT"
-            echo "API_ROOT=$API_ROOT"
-
-            if [ -z "$FRONTEND_ROOT" ] || [ "$FRONTEND_ROOT" = "/" ]; then
-              echo "Unsafe FRONTEND_ROOT"
+            if [ "$TARGET_DIR" != "/home/u902868468/app" ]; then
+              echo "Unsafe TARGET_DIR: $TARGET_DIR"
               exit 1
             fi
 
-            if [ -z "$API_ROOT" ] || [ "$API_ROOT" = "/" ]; then
-              echo "Unsafe API_ROOT"
+            if [ "$PUBLIC_DIR" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
+              echo "Unsafe PUBLIC_DIR: $PUBLIC_DIR"
               exit 1
             fi
 
-            # prepare staging areas (non-destructive)
-            mkdir -p "$FRONTEND_ROOT"
-            mkdir -p "$TARGET_DIR/staging"
-            mkdir -p "$STAGING_FRONTEND"
-            mkdir -p "$STAGED_API"
+            mkdir -p "$BACKEND_LIVE" "$STAGED_API" "$TARGET_DIR/backups"
 
-            echo "Deploying frontend to staging..."
-            rsync -a --delete "$FRONTEND_SOURCE/" "$STAGING_FRONTEND/"
+            rsync -a "$BACKEND_SOURCE/" "$BACKEND_LIVE/"
 
-            echo "Frontend staged at $STAGING_FRONTEND"
-
-            echo "Preserving any currently deployed .env if present..."
-            if [ -f "$TARGET_DIR/backend/.env" ]; then
-              cp "$TARGET_DIR/backend/.env" "$TARGET_DIR/.env.deployed.bak" || true
-              echo "Saved existing deployed .env to $TARGET_DIR/.env.deployed.bak"
-            fi
-
-            echo "Deploying backend..."
-            rsync -a --delete \
-              "$BACKEND_SOURCE/" \
-              "$TARGET_DIR/backend/"
-
-            BACKEND_SOURCE="$TARGET_DIR/backend"
-
-            echo "Creating API .htaccess in staging..."
-
-            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
-            <IfModule mod_rewrite.c>
-              RewriteEngine On
-
-              RewriteCond %{HTTP:Authorization} .
-              RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-
-              RewriteCond %{REQUEST_FILENAME} !-d
-              RewriteCond %{REQUEST_FILENAME} !-f
-              RewriteRule ^ index.php [L]
-            </IfModule>
-            HTACCESS
-
-            echo "Creating SPA .htaccess in staging..."
-
-            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
-            <IfModule mod_rewrite.c>
-              RewriteEngine On
-              RewriteBase /
-
-              RewriteCond %{REQUEST_FILENAME} -f [OR]
-              RewriteCond %{REQUEST_FILENAME} -d
-              RewriteRule ^ - [L]
-
-              RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
-
-              RewriteRule ^ index.html [L]
-            </IfModule>
-            HTACCESS
-
-            echo "Creating Laravel API bootstrap in staging..."
-
-            cat > "$STAGED_API/index.php" <<PHP
-            <?php
-
-            use Illuminate\Foundation\Application;
-            use Illuminate\Http\Request;
-
-            define('LARAVEL_START', microtime(true));
-
-            \$backendRoot = '$BACKEND_SOURCE';
-
-            if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
-              require \$maintenance;
-            }
-
-            require \$backendRoot.'/vendor/autoload.php';
-
-            /** @var Application \$app */
-            \$app = require_once \$backendRoot.'/bootstrap/app.php';
-
-            \$app->handleRequest(Request::capture());
-            PHP
-
-            echo "Creating API test endpoint in staging..."
-
-            cat > "$STAGED_API/test_post.php" <<'PHP'
-            <?php
-
-            header('Content-Type: application/json');
-
-            echo json_encode([
-              'method' => $_SERVER['REQUEST_METHOD'],
-              'body' => file_get_contents('php://input'),
-            ]);
-            PHP
-
-            echo "Creating .env..."
-
-            ENV_PATH="$BACKEND_SOURCE/.env"
-
-            # Restore previously deployed .env if we saved one before overwriting
-            if [ -f "$TARGET_DIR/.env.deployed.bak" ]; then
-              cp "$TARGET_DIR/.env.deployed.bak" "$ENV_PATH" || true
-              echo "Restored deployed .env to $ENV_PATH"
-
-            # If an ENV_FILE secret was provided, use that
-            elif [ -n "${{ secrets.ENV_FILE }}" ]; then
+            ENV_PATH="$BACKEND_LIVE/.env"
+            if [ ! -f "$ENV_PATH" ] && [ -n "${{ secrets.ENV_FILE }}" ]; then
               printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
+            fi
 
-            else
-              # Seed a minimal production .env. Encourage providing a real ENV_FILE via secrets.
+            if [ ! -f "$ENV_PATH" ]; then
               cat > "$ENV_PATH" <<'ENVFILE'
-              APP_NAME="OMS v3.0"
-              APP_ENV=production
-              APP_KEY=base64:REPLACE_ME
-              APP_DEBUG=false
-              APP_URL=https://app.apnistationery.com
+APP_NAME="OMSV3"
+APP_ENV=production
+APP_KEY=base64:REPLACE_ME
+APP_DEBUG=false
+APP_URL=https://app.apnistationery.com
 
-              LOG_CHANNEL=stack
-              LOG_STACK=single
-              LOG_LEVEL=debug
+LOG_CHANNEL=stack
+LOG_STACK=single
+LOG_LEVEL=debug
 
-              DB_CONNECTION=mysql
-              DB_HOST=127.0.0.1
-              DB_PORT=3306
-              DB_DATABASE=u902868468_Apnistationery
-              DB_USERNAME=u902868468_Himanshuk18
-              DB_PASSWORD=
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=
+DB_USERNAME=
+DB_PASSWORD=
 
-              SESSION_DRIVER=file
-              SESSION_LIFETIME=120
-              QUEUE_CONNECTION=sync
-              CACHE_STORE=file
-              ENVFILE
-
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+QUEUE_CONNECTION=sync
+CACHE_STORE=file
+ENVFILE
             fi
 
             if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
               APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-
               if grep -q '^APP_KEY=' "$ENV_PATH"; then
                 sed -i "s#^APP_KEY=.*#APP_KEY=$APP_KEY#" "$ENV_PATH"
               else
@@ -359,66 +161,120 @@ jobs:
               fi
             fi
 
-            mkdir -p "$BACKEND_SOURCE/storage/framework/cache"
-            mkdir -p "$BACKEND_SOURCE/storage/framework/sessions"
-            mkdir -p "$BACKEND_SOURCE/storage/framework/views"
-            mkdir -p "$BACKEND_SOURCE/storage/logs"
-            mkdir -p "$BACKEND_SOURCE/bootstrap/cache"
+            mkdir -p "$BACKEND_LIVE/storage/framework/cache"
+            mkdir -p "$BACKEND_LIVE/storage/framework/sessions"
+            mkdir -p "$BACKEND_LIVE/storage/framework/views"
+            mkdir -p "$BACKEND_LIVE/storage/logs"
+            mkdir -p "$BACKEND_LIVE/bootstrap/cache"
+            chmod -R 775 "$BACKEND_LIVE/storage" "$BACKEND_LIVE/bootstrap/cache" || true
 
-            chmod -R 775 "$BACKEND_SOURCE/storage" || true
-            chmod -R 775 "$BACKEND_SOURCE/bootstrap/cache" || true
+            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ index.php [L]
+</IfModule>
+HTACCESS
 
-            if [ -L "$STAGED_API/storage" ]; then
-              rm -f "$STAGED_API/storage"
+            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
+  RewriteRule ^ index.html [L]
+</IfModule>
+HTACCESS
+
+            cat > "$STAGED_API/index.php" <<PHP
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+\$backendRoot = '$BACKEND_LIVE';
+
+if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
+    require \$maintenance;
+}
+
+require \$backendRoot.'/vendor/autoload.php';
+
+/** @var Application \$app */
+\$app = require_once \$backendRoot.'/bootstrap/app.php';
+
+\$app->handleRequest(Request::capture());
+PHP
+
+            cat > "$STAGED_API/test_post.php" <<'PHP'
+<?php
+header('Content-Type: application/json');
+echo json_encode([
+  'method' => $_SERVER['REQUEST_METHOD'],
+  'body' => file_get_contents('php://input'),
+]);
+PHP
+
+            if [ -x "${{ env.PHP_BIN }}" ]; then
+              PHP_BIN="${{ env.PHP_BIN }}"
+            else
+              PHP_BIN=$(command -v php)
             fi
 
-            ln -sfn \
-              "$BACKEND_SOURCE/storage/app/public" \
-              "$STAGED_API/storage" || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" optimize:clear || true
 
-            PHP_BIN="/opt/alt/php84/usr/bin/php"
-
-            if [ ! -x "$PHP_BIN" ]; then
-              PHP_BIN=$(which php)
-            fi
-
-            echo "Using PHP binary: $PHP_BIN"
-
-            "$PHP_BIN" "$BACKEND_SOURCE/artisan" optimize:clear || true
-            # Decide whether to run migrations: only run when DB_CONNECTION=mysql and DB_PASSWORD is set
             DB_CONN=$(grep -E '^DB_CONNECTION=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
             DB_PASS=$(grep -E '^DB_PASSWORD=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
-
             if [ "${DB_CONN:-}" = "mysql" ] && [ -n "$DB_PASS" ]; then
-              echo "Running migrations against MySQL"
-              "$PHP_BIN" "$BACKEND_SOURCE/artisan" migrate --force --no-interaction || true
+              "$PHP_BIN" "$BACKEND_LIVE/artisan" migrate --force --no-interaction || true
             else
-              echo "Skipping migrations: DB_CONNECTION='$DB_CONN' DB_PASSWORD set: $( [ -n "$DB_PASS" ] && echo yes || echo no )"
+              echo "Skipping migrations: DB not configured for mysql"
             fi
-            "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
-            "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
-            "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
 
-            # Publish to production only when FORCE_DEPLOY=true (safety gate)
-            if [ "${{ secrets.FORCE_DEPLOY }}" = "true" ]; then
-              echo "FORCE_DEPLOY=true — backing up and publishing staged content to production"
-              mkdir -p "$TARGET_DIR/backups"
-              ts=$(date +%Y%m%d%H%M%S)
-              echo "Creating frontend backup..."
-              tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$FRONTEND_ROOT" . || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" config:cache || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" route:cache || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" view:cache || true
 
-              echo "Syncing staged frontend to production..."
-              rsync -a --delete "$STAGING_FRONTEND/" "$FRONTEND_ROOT/"
+      - name: Publish staged frontend/api to production only when FORCE_DEPLOY=true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set -e
 
-              echo "Syncing staged API to production..."
-              mkdir -p "$FRONTEND_ROOT/api"
-              rsync -a --delete "$STAGED_API/" "$FRONTEND_ROOT/api/"
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            PUBLIC_DIR="${{ env.PUBLIC_DIR }}"
+            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
+            STAGED_API="$TARGET_DIR/staging/api"
 
-              echo "Cleaning staging directories..."
-              rm -rf "$TARGET_DIR/staging/frontend_dist" "$TARGET_DIR/staging/api" || true
-            else
-              echo "FORCE_DEPLOY not set; production sync skipped. Staging available at $STAGING_FRONTEND"
+            if [ "${{ secrets.FORCE_DEPLOY }}" != "true" ]; then
+              echo "FORCE_DEPLOY is not true. Skipping production publish."
+              exit 0
             fi
+
+            if [ "$TARGET_DIR" != "/home/u902868468/app" ] || [ "$PUBLIC_DIR" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
+              echo "Safety check failed for path lock."
+              exit 1
+            fi
+
+            mkdir -p "$TARGET_DIR/backups" "$PUBLIC_DIR" "$PUBLIC_DIR/api"
+            ts=$(date +%Y%m%d%H%M%S)
+            tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$PUBLIC_DIR" . || true
+
+            rsync -a "$STAGING_FRONTEND/" "$PUBLIC_DIR/"
+            rsync -a "$STAGED_API/" "$PUBLIC_DIR/api/"
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
@@ -427,44 +283,18 @@ jobs:
           port: ${{ env.SSH_PORT }}
           username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          password: ${{ secrets.SSH_PASSWORD }}
           timeout: 120s
           command_timeout: 10m
           script: |
             set -e
-
-            echo "=== PUBLIC ROOT ==="
+            echo "=== FRONTEND ROOT ==="
             ls -la "${{ env.PUBLIC_DIR }}" || true
 
-            echo "=== API ROOT ==="
+            echo "=== STAGING FRONTEND ==="
+            ls -la "${{ env.TARGET_DIR }}/staging/frontend_dist" || true
+
+            echo "=== STAGING API ==="
+            ls -la "${{ env.TARGET_DIR }}/staging/api" || true
+
+            echo "=== LIVE API ==="
             ls -la "${{ env.PUBLIC_DIR }}/api" || true
-
-            echo "=== API INDEX ==="
-            sed -n '1,80p' "${{ env.PUBLIC_DIR }}/api/index.php" || true
-
-            echo "=== TEST ENDPOINT ==="
-            curl -i --max-time 15 \
-              "https://${{ env.DEPLOY_DOMAIN }}/api/test_post.php" || true
-
-            echo "=== LOGIN ENDPOINT ==="
-            curl -i --max-time 15 \
-              -X POST \
-              "https://${{ env.DEPLOY_DOMAIN }}/api/index.php/api/auth/login" \
-              -H "Accept: application/json" \
-              -H "Content-Type: application/json" \
-              -d '{}' || true
-
-            echo "=== PHP VERSION ==="
-            /opt/alt/php84/usr/bin/php -v || php -v || true
-
-            echo "=== STORAGE LOGS ==="
-
-            TARGET_DIR="$HOME/app"
-            BACKEND_SOURCE="$TARGET_DIR/backend"
-
-            if [ -d "$BACKEND_SOURCE/storage/logs" ]; then
-              for f in "$BACKEND_SOURCE"/storage/logs/*.log; do
-                echo "--- $f ---"
-                tail -n 100 "$f" || true
-              done
-            fi
