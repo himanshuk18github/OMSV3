@@ -11,6 +11,9 @@ jobs:
       DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN || 'app.apnistationery.com' }}
       TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/apps/oms', secrets.SSH_USER) }}
       PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN || 'app.apnistationery.com') }}
+      SSH_HOST: ${{ secrets.SSH_HOST || '82.112.232.23' }}
+      SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
+      SSH_USER: ${{ secrets.SSH_USER || 'u902868468468' }}
 
     steps:
       - name: Checkout
@@ -49,12 +52,12 @@ jobs:
       - name: Validate deployment secrets
         run: |
           set -e
-          if [ -z "${{ secrets.SSH_HOST }}" ]; then
-            echo "Missing required secret: SSH_HOST"
+          if [ -z "${{ env.SSH_HOST }}" ]; then
+            echo "Missing SSH host (expected Hostinger IP or domain)"
             exit 1
           fi
-          if [ -z "${{ secrets.SSH_USER }}" ]; then
-            echo "Missing required secret: SSH_USER"
+          if [ -z "${{ env.SSH_USER }}" ]; then
+            echo "Missing SSH user"
             exit 1
           fi
           if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
@@ -64,20 +67,23 @@ jobs:
           echo "Derived DEPLOY_DOMAIN=${{ env.DEPLOY_DOMAIN }}"
           echo "Derived TARGET_DIR=${{ env.TARGET_DIR }}"
           echo "Derived PUBLIC_DIR=${{ env.PUBLIC_DIR }}"
+          echo "Using SSH_HOST=${{ env.SSH_HOST }}"
+          echo "Using SSH_PORT=${{ env.SSH_PORT }}"
+          echo "Using SSH_USER=${{ env.SSH_USER }}"
 
       - name: Ensure remote directories (with connectivity test)
         run: |
-          echo "Testing SSH connectivity to ${{ secrets.SSH_HOST }}:${{ secrets.SSH_PORT || '65002' }}"
-          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT || '65002' }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'echo SSH_OK' || {
+          echo "Testing SSH connectivity to ${{ env.SSH_HOST }}:${{ env.SSH_PORT }} as ${{ env.SSH_USER }}"
+          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" 'echo SSH_OK' || {
             echo "SSH connectivity test failed. Check SSH_HOST, SSH_PORT, and firewall settings."
             exit 2
           }
       - name: Ensure remote directories
         uses: appleboy/ssh-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '65002' }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 180s
           command_timeout: 20m
@@ -119,9 +125,9 @@ jobs:
       - name: Deploy on remote
         uses: appleboy/ssh-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '65002' }}
-          username: ${{ secrets.SSH_USER }}
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
           command_timeout: 30m
