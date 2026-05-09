@@ -41,12 +41,6 @@ jobs:
           npm ci --legacy-peer-deps
           npm run build
 
-      - name: Create artifact
-        run: |
-          mkdir -p /tmp/artifact
-          rsync -a --exclude='.git' --exclude='node_modules' --exclude='artifact.tar.gz' . /tmp/artifact/
-          tar -C /tmp/artifact -czf artifact.tar.gz .
-
       - name: Start SSH Agent
         uses: webfactory/ssh-agent@v0.5.3
         with:
@@ -100,7 +94,7 @@ jobs:
             mkdir -p "$TARGET_DIR"
             mkdir -p "$PUBLIC_DIR"
 
-      - name: Upload artifact
+      - name: Upload backend and frontend build
         uses: appleboy/scp-action@v0.1.6
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -109,7 +103,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           timeout: 120s
           command_timeout: 20m
-          source: artifact.tar.gz
+          source: "backend,frontend/dist"
           target: ${{ env.TARGET_DIR }}
 
       - name: Deploy on remote
@@ -125,23 +119,13 @@ jobs:
             set -e
             cd ${{ env.TARGET_DIR }}
             ls -la
-            # scp-action may already extract uploaded content into TARGET_DIR.
-            # Only look for artifact tarball when source folders are not present.
-            if [ ! -d "${{ env.TARGET_DIR }}/backend" ] || [ ! -d "${{ env.TARGET_DIR }}/frontend" ]; then
-              ARTIFACT_PATH="${{ env.TARGET_DIR }}/artifact.tar.gz"
-              if [ ! -f "$ARTIFACT_PATH" ]; then
-                ARTIFACT_PATH="$(find ${{ env.TARGET_DIR }} -type f \( -name 'artifact.tar.gz' -o -name '*.tar.gz' \) | head -n 1)"
-              fi
-              if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
-                echo "Neither extracted source folders nor artifact.tar.gz were found under ${{ env.TARGET_DIR }}"
-                echo "Listing top-level target directory for diagnostics:"
-                ls -la "${{ env.TARGET_DIR }}" || true
-                echo "Listing tar.gz files under target (depth 3):"
-                find "${{ env.TARGET_DIR }}" -maxdepth 3 -type f -name '*.tar.gz' -print || true
-                exit 1
-              fi
-              echo "Using archive: $ARTIFACT_PATH"
-              tar -xzf "$ARTIFACT_PATH" -C ${{ env.TARGET_DIR }}
+            if [ ! -d "${{ env.TARGET_DIR }}/backend" ]; then
+              echo "backend directory not found after upload."
+              exit 1
+            fi
+            if [ ! -d "${{ env.TARGET_DIR }}/frontend/dist" ]; then
+              echo "frontend/dist directory not found after upload."
+              exit 1
             fi
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
