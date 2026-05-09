@@ -19,7 +19,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: '8.4'
           extensions: mbstring, pdo_mysql
           tools: composer:2
 
@@ -128,29 +128,19 @@ jobs:
           script: |
             set -e
             TARGET_DIR="${{ env.TARGET_DIR }}"
-            cd "$TARGET_DIR"
-            ls -la
             BACKEND_DIR="$TARGET_DIR/backend"
             FRONTEND_DIST="$TARGET_DIR/frontend/dist"
-            if [ ! -d "$BACKEND_DIR" ]; then
-              echo "backend directory not found after upload."
-              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
-              exit 1
-            fi
-            if [ ! -d "$FRONTEND_DIST" ]; then
-              echo "frontend/dist directory not found after upload."
-              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
-              exit 1
-            fi
+            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
+            API_ROOT="${{ env.PUBLIC_DIR }}/api"
+
+            echo "Cleaning previous deployment folders..."
+            rm -rf "$BACKEND_DIR" "$TARGET_DIR/frontend" "$API_ROOT"
+            mkdir -p "$BACKEND_DIR" "$TARGET_DIR/frontend/dist" "$FRONTEND_ROOT" "$API_ROOT"
 
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
-            API_ROOT="${{ env.PUBLIC_DIR }}/api"
-            # Ensure frontend root exists, sync the built SPA, then create API folder
-            mkdir -p "$FRONTEND_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -av --delete "$FRONTEND_DIST/" "$FRONTEND_ROOT/"
-            # Re-create API folder after rsync in case rsync --delete removed it
             mkdir -p "$API_ROOT"
 
             # Create API .htaccess to route /api/* to API front controller
@@ -305,28 +295,15 @@ jobs:
             sed -i 's/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' "$ENV_PATH"
             sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
             sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
-            PHP_BIN="$(command -v php8.4 || command -v ea-php84 || command -v /opt/alt/php84/usr/bin/php || command -v /opt/alt/php84/usr/bin/php8.4 || command -v /usr/local/bin/php8.4 || command -v /usr/bin/php8.4 || command -v php)"
-            if [ -x "/opt/alt/php84/usr/bin/php" ]; then
-              PHP_BIN="/opt/alt/php84/usr/bin/php"
-            elif [ -x "/opt/alt/php84/usr/bin/php8.4" ]; then
-              PHP_BIN="/opt/alt/php84/usr/bin/php8.4"
-            elif [ -x "/usr/local/bin/php8.4" ]; then
-              PHP_BIN="/usr/local/bin/php8.4"
-            elif [ -x "/usr/bin/php8.4" ]; then
-              PHP_BIN="/usr/bin/php8.4"
-            elif [ -x "$(command -v php8.4 2>/dev/null)" ]; then
-              PHP_BIN="$(command -v php8.4)"
-            elif [ -x "$(command -v ea-php84 2>/dev/null)" ]; then
-              PHP_BIN="$(command -v ea-php84)"
-            else
-              PHP_BIN="$(command -v php)"
+            PHP_BIN="/opt/alt/php84/usr/bin/php"
+            if [ ! -x "$PHP_BIN" ]; then
+              echo "Expected PHP 8.4 CLI not found at $PHP_BIN."
+              echo "Cannot run artisan clean commands safely."
+              exit 1
             fi
             PHP_VERSION_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION;')"
             PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
             echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
-            if [ "$PHP_VERSION_ID_OUTPUT" -lt 80300 ]; then
-              echo "Warning: remote CLI PHP is below 8.3; this app requires 8.3+ for artisan commands."
-            fi
             chown -R ${{ secrets.SSH_USER }}:www-data ${{ env.TARGET_DIR }} || true
             chmod -R 775 ${{ env.TARGET_DIR }}/backend/storage ${{ env.TARGET_DIR }}/backend/bootstrap/cache || true
             if [ -f "${{ env.TARGET_DIR }}/backend/artisan" ]; then
