@@ -117,23 +117,51 @@ jobs:
           command_timeout: 30m
           script: |
             set -e
-            cd ${{ env.TARGET_DIR }}
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            cd "$TARGET_DIR"
             ls -la
-            if [ ! -d "${{ env.TARGET_DIR }}/backend" ]; then
-              echo "backend directory not found after upload."
-              exit 1
+
+            BACKEND_DIR="$TARGET_DIR/backend"
+            if [ ! -d "$BACKEND_DIR" ]; then
+              FOUND_BACKEND="$(find "$TARGET_DIR" -type d -name backend | head -n 1)"
+              if [ -n "$FOUND_BACKEND" ] && [ -d "$FOUND_BACKEND" ]; then
+                BACKEND_DIR="$FOUND_BACKEND"
+                ln -sfn "$BACKEND_DIR" "$TARGET_DIR/backend"
+              else
+                echo "backend directory not found after upload."
+                find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+                exit 1
+              fi
             fi
-            if [ ! -d "${{ env.TARGET_DIR }}/frontend/dist" ]; then
-              echo "frontend/dist directory not found after upload."
-              exit 1
+
+            FRONTEND_DIST="$TARGET_DIR/frontend/dist"
+            if [ ! -d "$FRONTEND_DIST" ]; then
+              if [ -d "$TARGET_DIR/dist" ]; then
+                FRONTEND_DIST="$TARGET_DIR/dist"
+              else
+                FOUND_DIST="$(find "$TARGET_DIR" -type d -path '*/frontend/dist' | head -n 1)"
+                if [ -z "$FOUND_DIST" ]; then
+                  FOUND_DIST="$(find "$TARGET_DIR" -maxdepth 4 -type d -name dist | head -n 1)"
+                fi
+                if [ -n "$FOUND_DIST" ] && [ -d "$FOUND_DIST" ]; then
+                  FRONTEND_DIST="$FOUND_DIST"
+                else
+                  echo "frontend/dist directory not found after upload."
+                  find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+                  exit 1
+                fi
+              fi
             fi
+
+            echo "Resolved BACKEND_DIR=$BACKEND_DIR"
+            echo "Resolved FRONTEND_DIST=$FRONTEND_DIST"
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
             # Ensure frontend root exists, sync the built SPA, then create API folder
             mkdir -p "$FRONTEND_ROOT"
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
-            rsync -av --delete "${{ env.TARGET_DIR }}/frontend/dist/" "$FRONTEND_ROOT/"
+            rsync -av --delete "$FRONTEND_DIST/" "$FRONTEND_ROOT/"
             # Re-create API folder after rsync in case rsync --delete removed it
             mkdir -p "$API_ROOT"
 
@@ -193,7 +221,7 @@ jobs:
 
             define('LARAVEL_START', microtime(true));
 
-            // Absolute path to backend (derived by workflow env TARGET_DIR)
+            // Absolute path to backend (resolved in deploy script)
             $backendRoot = '${{ env.TARGET_DIR }}/backend';
 
             if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
