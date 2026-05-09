@@ -305,7 +305,22 @@ jobs:
             sed -i 's/^SESSION_DRIVER=.*/SESSION_DRIVER=file/' "$ENV_PATH"
             sed -i 's/^CACHE_STORE=.*/CACHE_STORE=file/' "$ENV_PATH"
             sed -i 's/^QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' "$ENV_PATH"
-            PHP_BIN="$(command -v php8.4 || command -v ea-php84 || command -v php)"
+            PHP_BIN="$(command -v php8.4 || command -v ea-php84 || command -v /opt/alt/php84/usr/bin/php || command -v /opt/alt/php84/usr/bin/php8.4 || command -v /usr/local/bin/php8.4 || command -v /usr/bin/php8.4 || command -v php)"
+            if [ -x "/opt/alt/php84/usr/bin/php" ]; then
+              PHP_BIN="/opt/alt/php84/usr/bin/php"
+            elif [ -x "/opt/alt/php84/usr/bin/php8.4" ]; then
+              PHP_BIN="/opt/alt/php84/usr/bin/php8.4"
+            elif [ -x "/usr/local/bin/php8.4" ]; then
+              PHP_BIN="/usr/local/bin/php8.4"
+            elif [ -x "/usr/bin/php8.4" ]; then
+              PHP_BIN="/usr/bin/php8.4"
+            elif [ -x "$(command -v php8.4 2>/dev/null)" ]; then
+              PHP_BIN="$(command -v php8.4)"
+            elif [ -x "$(command -v ea-php84 2>/dev/null)" ]; then
+              PHP_BIN="$(command -v ea-php84)"
+            else
+              PHP_BIN="$(command -v php)"
+            fi
             PHP_VERSION_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION;')"
             PHP_VERSION_ID_OUTPUT="$($PHP_BIN -r 'echo PHP_VERSION_ID;')"
             echo "Using PHP CLI: $PHP_BIN ($PHP_VERSION_OUTPUT)"
