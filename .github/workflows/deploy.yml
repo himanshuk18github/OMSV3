@@ -363,6 +363,7 @@ jobs:
             chmod -R 775 "$BACKEND_SOURCE/storage" "$BACKEND_SOURCE/bootstrap/cache" || true
             if [ -f "$BACKEND_SOURCE/artisan" ]; then
               "$PHP_BIN" "$BACKEND_SOURCE/artisan" optimize:clear || true
+              "$PHP_BIN" "$BACKEND_SOURCE/artisan" migrate --force --no-interaction
               "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
               "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
               "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
