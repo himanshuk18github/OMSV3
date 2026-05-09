@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DEPLOY_DOMAIN: ${{ secrets.DEPLOY_DOMAIN || 'app.apnistationery.com' }}
-      TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/apps/oms', secrets.SSH_USER) }}
+      TARGET_DIR: ${{ secrets.TARGET_DIR || format('/home/{0}/app', secrets.SSH_USER) }}
       PUBLIC_DIR: ${{ secrets.PUBLIC_DIR || format('/home/{0}/domains/{1}/public_html', secrets.SSH_USER, secrets.DEPLOY_DOMAIN || 'app.apnistationery.com') }}
       SSH_HOST: ${{ secrets.SSH_HOST || '82.112.232.23' }}
       SSH_PORT: ${{ secrets.SSH_PORT || '65002' }}
