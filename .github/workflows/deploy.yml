@@ -93,18 +93,28 @@ jobs:
 
             mkdir -p "$TARGET_DIR"
             mkdir -p "$PUBLIC_DIR"
+            mkdir -p "$TARGET_DIR/backend"
+            mkdir -p "$TARGET_DIR/frontend/dist"
 
       - name: Upload backend and frontend build
-        uses: appleboy/scp-action@v0.1.6
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT || '22' }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 120s
-          command_timeout: 20m
-          source: "backend,frontend/dist"
-          target: ${{ env.TARGET_DIR }}
+        run: |
+          set -e
+          SSH_PORT="${{ secrets.SSH_PORT || '22' }}"
+          SSH_USER="${{ secrets.SSH_USER }}"
+          SSH_HOST="${{ secrets.SSH_HOST }}"
+          TARGET_DIR="${{ env.TARGET_DIR }}"
+
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+
+          rsync -az --delete \
+            -e "$RSYNC_SSH" \
+            backend/ \
+            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/backend/"
+
+          rsync -az --delete \
+            -e "$RSYNC_SSH" \
+            frontend/dist/ \
+            "${SSH_USER}@${SSH_HOST}:${TARGET_DIR}/frontend/dist/"
 
       - name: Deploy on remote
         uses: appleboy/ssh-action@v0.1.7
@@ -120,41 +130,19 @@ jobs:
             TARGET_DIR="${{ env.TARGET_DIR }}"
             cd "$TARGET_DIR"
             ls -la
-
             BACKEND_DIR="$TARGET_DIR/backend"
-            if [ ! -d "$BACKEND_DIR" ]; then
-              FOUND_BACKEND="$(find "$TARGET_DIR" -type d -name backend | head -n 1)"
-              if [ -n "$FOUND_BACKEND" ] && [ -d "$FOUND_BACKEND" ]; then
-                BACKEND_DIR="$FOUND_BACKEND"
-                ln -sfn "$BACKEND_DIR" "$TARGET_DIR/backend"
-              else
-                echo "backend directory not found after upload."
-                find "$TARGET_DIR" -maxdepth 4 -type d -print || true
-                exit 1
-              fi
-            fi
-
             FRONTEND_DIST="$TARGET_DIR/frontend/dist"
+            if [ ! -d "$BACKEND_DIR" ]; then
+              echo "backend directory not found after upload."
+              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+              exit 1
+            fi
             if [ ! -d "$FRONTEND_DIST" ]; then
-              if [ -d "$TARGET_DIR/dist" ]; then
-                FRONTEND_DIST="$TARGET_DIR/dist"
-              else
-                FOUND_DIST="$(find "$TARGET_DIR" -type d -path '*/frontend/dist' | head -n 1)"
-                if [ -z "$FOUND_DIST" ]; then
-                  FOUND_DIST="$(find "$TARGET_DIR" -maxdepth 4 -type d -name dist | head -n 1)"
-                fi
-                if [ -n "$FOUND_DIST" ] && [ -d "$FOUND_DIST" ]; then
-                  FRONTEND_DIST="$FOUND_DIST"
-                else
-                  echo "frontend/dist directory not found after upload."
-                  find "$TARGET_DIR" -maxdepth 4 -type d -print || true
-                  exit 1
-                fi
-              fi
+              echo "frontend/dist directory not found after upload."
+              find "$TARGET_DIR" -maxdepth 4 -type d -print || true
+              exit 1
             fi
 
-            echo "Resolved BACKEND_DIR=$BACKEND_DIR"
-            echo "Resolved FRONTEND_DIST=$FRONTEND_DIST"
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
