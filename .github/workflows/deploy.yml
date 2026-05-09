@@ -1,7 +1,10 @@
 name: Build and Deploy
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+      - clean-backend-frontend
 
 jobs:
   build-and-deploy:
@@ -13,7 +16,7 @@ jobs:
       SSH_PORT: 65002
       SSH_USER: u902868468468
       PUBLIC_DIR: /home/u902868468468/domains/app.apnistationery.com/public_html
-      TARGET_DIR: ~/app
+      TARGET_DIR: /home/u902868468468/app
 
     steps:
       - name: Checkout
@@ -195,6 +198,8 @@ jobs:
 
             FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
             API_ROOT="${{ env.PUBLIC_DIR }}/api"
+            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
+            STAGED_API="$TARGET_DIR/staging/api"
 
             echo "TARGET_DIR=$TARGET_DIR"
             echo "FRONTEND_ROOT=$FRONTEND_ROOT"
@@ -210,15 +215,16 @@ jobs:
               exit 1
             fi
 
-            rm -rf "$API_ROOT"
-
+            # prepare staging areas (non-destructive)
             mkdir -p "$FRONTEND_ROOT"
-            mkdir -p "$API_ROOT"
+            mkdir -p "$TARGET_DIR/staging"
+            mkdir -p "$STAGING_FRONTEND"
+            mkdir -p "$STAGED_API"
 
-            echo "Deploying frontend..."
-            rsync -a --delete "$FRONTEND_SOURCE/" "$FRONTEND_ROOT/"
+            echo "Deploying frontend to staging..."
+            rsync -a --delete "$FRONTEND_SOURCE/" "$STAGING_FRONTEND/"
 
-            mkdir -p "$API_ROOT"
+            echo "Frontend staged at $STAGING_FRONTEND"
 
             echo "Preserving any currently deployed .env if present..."
             if [ -f "$TARGET_DIR/backend/.env" ]; then
@@ -233,9 +239,9 @@ jobs:
 
             BACKEND_SOURCE="$TARGET_DIR/backend"
 
-            echo "Creating API .htaccess..."
+            echo "Creating API .htaccess in staging..."
 
-            cat > "$API_ROOT/.htaccess" <<'HTACCESS'
+            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
             <IfModule mod_rewrite.c>
               RewriteEngine On
 
@@ -248,9 +254,9 @@ jobs:
             </IfModule>
             HTACCESS
 
-            echo "Creating SPA .htaccess..."
+            echo "Creating SPA .htaccess in staging..."
 
-            cat > "$FRONTEND_ROOT/.htaccess" <<'HTACCESS'
+            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
             <IfModule mod_rewrite.c>
               RewriteEngine On
               RewriteBase /
@@ -265,9 +271,9 @@ jobs:
             </IfModule>
             HTACCESS
 
-            echo "Creating Laravel API bootstrap..."
+            echo "Creating Laravel API bootstrap in staging..."
 
-            cat > "$API_ROOT/index.php" <<PHP
+            cat > "$STAGED_API/index.php" <<PHP
             <?php
 
             use Illuminate\Foundation\Application;
@@ -289,9 +295,9 @@ jobs:
             \$app->handleRequest(Request::capture());
             PHP
 
-            echo "Creating API test endpoint..."
+            echo "Creating API test endpoint in staging..."
 
-            cat > "$API_ROOT/test_post.php" <<'PHP'
+            cat > "$STAGED_API/test_post.php" <<'PHP'
             <?php
 
             header('Content-Type: application/json');
@@ -362,13 +368,13 @@ jobs:
             chmod -R 775 "$BACKEND_SOURCE/storage" || true
             chmod -R 775 "$BACKEND_SOURCE/bootstrap/cache" || true
 
-            if [ -L "$API_ROOT/storage" ]; then
-              rm -f "$API_ROOT/storage"
+            if [ -L "$STAGED_API/storage" ]; then
+              rm -f "$STAGED_API/storage"
             fi
 
             ln -sfn \
               "$BACKEND_SOURCE/storage/app/public" \
-              "$API_ROOT/storage" || true
+              "$STAGED_API/storage" || true
 
             PHP_BIN="/opt/alt/php84/usr/bin/php"
 
@@ -392,6 +398,27 @@ jobs:
             "$PHP_BIN" "$BACKEND_SOURCE/artisan" config:cache || true
             "$PHP_BIN" "$BACKEND_SOURCE/artisan" route:cache || true
             "$PHP_BIN" "$BACKEND_SOURCE/artisan" view:cache || true
+
+            # Publish to production only when FORCE_DEPLOY=true (safety gate)
+            if [ "${{ secrets.FORCE_DEPLOY }}" = "true" ]; then
+              echo "FORCE_DEPLOY=true — backing up and publishing staged content to production"
+              mkdir -p "$TARGET_DIR/backups"
+              ts=$(date +%Y%m%d%H%M%S)
+              echo "Creating frontend backup..."
+              tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$FRONTEND_ROOT" . || true
+
+              echo "Syncing staged frontend to production..."
+              rsync -a --delete "$STAGING_FRONTEND/" "$FRONTEND_ROOT/"
+
+              echo "Syncing staged API to production..."
+              mkdir -p "$FRONTEND_ROOT/api"
+              rsync -a --delete "$STAGED_API/" "$FRONTEND_ROOT/api/"
+
+              echo "Cleaning staging directories..."
+              rm -rf "$TARGET_DIR/staging/frontend_dist" "$TARGET_DIR/staging/api" || true
+            else
+              echo "FORCE_DEPLOY not set; production sync skipped. Staging available at $STAGING_FRONTEND"
+            fi
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
