@@ -165,6 +165,8 @@ jobs:
             echo "Using CI-built dependencies and assets; skipping remote composer/npm."
             echo "Syncing frontend build to web root: $FRONTEND_ROOT"
             rsync -a --delete "$FRONTEND_SOURCE/" "$FRONTEND_ROOT/"
+            # rsync with --delete can remove generated directories (like api). Recreate API_ROOT after sync.
+            mkdir -p "$API_ROOT"
 
             # Create API .htaccess to route /api/* to API front controller
             cat > "$API_ROOT/.htaccess" <<'HTACCESS'
