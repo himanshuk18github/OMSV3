@@ -1,0 +1,298 @@
+name: Build and Deploy (Safe)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      DEPLOY_DOMAIN: app.apnistationery.com
+      SSH_HOST: 82.112.232.23
+      SSH_PORT: 65002
+      SSH_USER: u902868468
+      TARGET_DIR: /home/u902868468/app
+      PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
+      PHP_BIN: /opt/alt/php84/usr/bin/php
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required repository structure
+        run: |
+          set -e
+          test -f backend/composer.json || { echo "Missing backend/composer.json"; exit 1; }
+          test -f frontend/package.json || { echo "Missing frontend/package.json"; exit 1; }
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, pdo_mysql
+          tools: composer:2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install backend dependencies
+        working-directory: ./backend
+        run: |
+          composer install \
+            --no-dev \
+            --prefer-dist \
+            --no-interaction \
+            --optimize-autoloader
+
+      - name: Build frontend
+        working-directory: ./frontend
+        env:
+          VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php/api
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+          npm run build
+
+      - name: Start SSH Agent
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Test SSH connectivity
+        run: |
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o StrictHostKeyChecking=no \
+            -p "${{ env.SSH_PORT }}" \
+            "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+            'echo SSH_OK'
+
+      - name: Upload artifacts to staging only
+        run: |
+          set -e
+
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${{ env.SSH_PORT }}"
+
+          ssh -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
+            "mkdir -p '${{ env.TARGET_DIR }}/staging/backend' '${{ env.TARGET_DIR }}/staging/frontend_dist' '${{ env.TARGET_DIR }}/staging/api'"
+
+          rsync -az --delete -e "$RSYNC_SSH" backend/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/backend/"
+          rsync -az --delete -e "$RSYNC_SSH" frontend/dist/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/frontend_dist/"
+
+      - name: Prepare backend and staged API on remote
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 180s
+          command_timeout: 30m
+          script: |
+            set -e
+
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
+            BACKEND_SOURCE="$TARGET_DIR/staging/backend"
+            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
+            STAGED_API="$TARGET_DIR/staging/api"
+            BACKEND_LIVE="$TARGET_DIR/backend"
+
+            if [ "$TARGET_DIR" != "/home/u902868468/app" ]; then
+              echo "Unsafe TARGET_DIR: $TARGET_DIR"
+              exit 1
+            fi
+
+            if [ "$FRONTEND_ROOT" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
+              echo "Unsafe PUBLIC_DIR: $FRONTEND_ROOT"
+              exit 1
+            fi
+
+            mkdir -p "$BACKEND_LIVE" "$STAGED_API" "$TARGET_DIR/backups"
+
+            rsync -a "$BACKEND_SOURCE/" "$BACKEND_LIVE/"
+
+            ENV_PATH="$BACKEND_LIVE/.env"
+            if [ ! -f "$ENV_PATH" ] && [ -n "${{ secrets.ENV_FILE }}" ]; then
+              printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
+            fi
+
+            if [ ! -f "$ENV_PATH" ]; then
+              cat > "$ENV_PATH" <<'ENVFILE'
+APP_NAME="OMSV3"
+APP_ENV=production
+APP_KEY=base64:REPLACE_ME
+APP_DEBUG=false
+APP_URL=https://app.apnistationery.com
+
+LOG_CHANNEL=stack
+LOG_STACK=single
+LOG_LEVEL=debug
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=
+DB_USERNAME=
+DB_PASSWORD=
+
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+QUEUE_CONNECTION=sync
+CACHE_STORE=file
+ENVFILE
+            fi
+
+            if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
+              APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+              if grep -q '^APP_KEY=' "$ENV_PATH"; then
+                sed -i "s#^APP_KEY=.*#APP_KEY=$APP_KEY#" "$ENV_PATH"
+              else
+                echo "APP_KEY=$APP_KEY" >> "$ENV_PATH"
+              fi
+            fi
+
+            mkdir -p "$BACKEND_LIVE/storage/framework/cache"
+            mkdir -p "$BACKEND_LIVE/storage/framework/sessions"
+            mkdir -p "$BACKEND_LIVE/storage/framework/views"
+            mkdir -p "$BACKEND_LIVE/storage/logs"
+            mkdir -p "$BACKEND_LIVE/bootstrap/cache"
+            chmod -R 775 "$BACKEND_LIVE/storage" "$BACKEND_LIVE/bootstrap/cache" || true
+
+            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^ index.php [L]
+</IfModule>
+HTACCESS
+
+            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
+  RewriteRule ^ index.html [L]
+</IfModule>
+HTACCESS
+
+            cat > "$STAGED_API/index.php" <<PHP
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+\$backendRoot = '$BACKEND_LIVE';
+
+if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
+    require \$maintenance;
+}
+
+require \$backendRoot.'/vendor/autoload.php';
+
+/** @var Application \$app */
+\$app = require_once \$backendRoot.'/bootstrap/app.php';
+
+\$app->handleRequest(Request::capture());
+PHP
+
+            cat > "$STAGED_API/test_post.php" <<'PHP'
+<?php
+header('Content-Type: application/json');
+echo json_encode([
+  'method' => $_SERVER['REQUEST_METHOD'],
+  'body' => file_get_contents('php://input'),
+]);
+PHP
+
+            if [ -x "${{ env.PHP_BIN }}" ]; then
+              PHP_BIN="${{ env.PHP_BIN }}"
+            else
+              PHP_BIN=$(command -v php)
+            fi
+
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" optimize:clear || true
+
+            DB_CONN=$(grep -E '^DB_CONNECTION=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
+            DB_PASS=$(grep -E '^DB_PASSWORD=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
+            if [ "${DB_CONN:-}" = "mysql" ] && [ -n "$DB_PASS" ]; then
+              "$PHP_BIN" "$BACKEND_LIVE/artisan" migrate --force --no-interaction || true
+            else
+              echo "Skipping migrations: DB not configured for mysql"
+            fi
+
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" config:cache || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" route:cache || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" view:cache || true
+
+      - name: Publish staged frontend/api to production only when FORCE_DEPLOY=true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set -e
+
+            TARGET_DIR="${{ env.TARGET_DIR }}"
+            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
+            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
+            STAGED_API="$TARGET_DIR/staging/api"
+
+            if [ "${{ secrets.FORCE_DEPLOY }}" != "true" ]; then
+              echo "FORCE_DEPLOY is not true. Skipping production publish."
+              exit 0
+            fi
+
+            if [ "$TARGET_DIR" != "/home/u902868468/app" ] || [ "$FRONTEND_ROOT" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
+              echo "Safety check failed for path lock."
+              exit 1
+            fi
+
+            mkdir -p "$TARGET_DIR/backups" "$FRONTEND_ROOT" "$FRONTEND_ROOT/api"
+            ts=$(date +%Y%m%d%H%M%S)
+            tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$FRONTEND_ROOT" . || true
+
+            rsync -a "$STAGING_FRONTEND/" "$FRONTEND_ROOT/"
+            rsync -a "$STAGED_API/" "$FRONTEND_ROOT/api/"
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          port: ${{ env.SSH_PORT }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          timeout: 120s
+          command_timeout: 10m
+          script: |
+            set -e
+            echo "=== FRONTEND ROOT ==="
+            ls -la "${{ env.PUBLIC_DIR }}" || true
+
+            echo "=== STAGING FRONTEND ==="
+            ls -la "${{ env.TARGET_DIR }}/staging/frontend_dist" || true
+
+            echo "=== STAGING API ==="
+            ls -la "${{ env.TARGET_DIR }}/staging/api" || true
+
+            echo "=== LIVE API (if published) ==="
+            ls -la "${{ env.PUBLIC_DIR }}/api" || true

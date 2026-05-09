@@ -1,0 +1,10 @@
+.MuiTableCell-root {
+  font-family: 'Poppins', sans-serif !important;
+}
+
+.recharts-default-tooltip {
+  background-color: white !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
+  padding: 12px !important;
+}

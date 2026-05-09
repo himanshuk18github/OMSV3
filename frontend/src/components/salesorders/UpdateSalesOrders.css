@@ -1,0 +1,164 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+.update-so-wrapper {
+    padding: 24px;
+    font-family: 'Poppins', sans-serif;
+    background-color: #f5f5f5;
+    min-height: calc(100vh - 48px);
+}
+
+/* Header Paper Styles */
+.update-so-header-paper {
+    margin-bottom: 24px;
+    border-radius: 12px !important;
+    background-color: #fff !important;
+}
+
+.update-so-page-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid #eee;
+}
+
+.update-so-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.update-so-back-button {
+    color: #666 !important;
+}
+
+/* Filters Section Styles */
+.update-so-filters-section {
+    padding: 20px 24px;
+}
+
+.update-so-search-container {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.update-so-search-field {
+    min-width: 300px;
+    background-color: #fff;
+}
+
+.update-so-date-range {
+    min-width: 200px;
+}
+
+.update-so-custom-date-container {
+    display: flex;
+    gap: 16px;
+}
+
+.update-so-date-input {
+    width: 200px;
+}
+
+.update-so-refresh-button {
+    margin-left: auto !important;
+    height: 40px;
+    background-color: #1976d2 !important;
+    text-transform: none !important;
+}
+
+/* Table Paper Styles */
+.update-so-table-paper {
+    border-radius: 12px !important;
+    overflow: hidden;
+    background-color: #fff !important;
+}
+
+/* Table Styles */
+.MuiTableHead-root .MuiTableCell-root {
+    background-color: #f8f9fa;
+    font-weight: 600 !important;
+    color: #333;
+    padding: 16px !important;
+}
+
+.MuiTableBody-root .MuiTableCell-root {
+    padding: 12px 16px !important;
+    font-size: 0.875rem;
+}
+
+.update-so-edit-button {
+    text-transform: none !important;
+    background-color: #1976d2 !important;
+}
+
+.update-so-no-records {
+    text-align: center;
+    padding: 24px !important;
+    color: #666;
+}
+
+/* Responsive Styles */
+@media (max-width: 1200px) {
+    .update-so-search-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .update-so-search-field,
+    .update-so-date-range,
+    .update-so-custom-date-container {
+        width: 100%;
+    }
+
+    .update-so-custom-date-container {
+        flex-direction: column;
+        gap: 16px;
+    }
+
+    .update-so-date-input {
+        width: 100%;
+    }
+
+    .update-so-refresh-button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 960px) {
+    .update-so-wrapper {
+        padding: 16px;
+    }
+
+    .update-so-page-header {
+        padding: 16px;
+    }
+
+    .update-so-filters-section {
+        padding: 16px;
+    }
+}
+
+/* Table Scrolling */
+.MuiTableContainer-root {
+    overflow-x: auto;
+    max-height: calc(100vh - 300px);
+}
+
+/* Custom Scrollbar */
+.MuiTableContainer-root::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.MuiTableContainer-root::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.MuiTableContainer-root::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.MuiTableContainer-root::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
