@@ -48,6 +48,34 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      - name: Validate deployment secrets
+        run: |
+          set -e
+          if [ -z "${{ secrets.SSH_HOST }}" ]; then
+            echo "Missing required secret: SSH_HOST"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_USER }}" ]; then
+            echo "Missing required secret: SSH_USER"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "Missing required secret: SSH_PRIVATE_KEY"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TARGET_DIR }}" ]; then
+            echo "Missing required secret: TARGET_DIR"
+            exit 1
+          fi
+          if [ -z "${{ secrets.PUBLIC_DIR }}" ]; then
+            echo "Missing required secret: PUBLIC_DIR"
+            exit 1
+          fi
+          if [ -z "${{ secrets.DEPLOY_DOMAIN }}" ]; then
+            echo "Missing required secret: DEPLOY_DOMAIN"
+            exit 1
+          fi
+
       - name: Ensure remote directories (with connectivity test)
         run: |
           echo "Testing SSH connectivity to ${{ secrets.SSH_HOST }}:${{ secrets.SSH_PORT || '22' }}"
@@ -65,8 +93,17 @@ jobs:
           timeout: 180s
           command_timeout: 20m
           script: |
-            mkdir -p ${{ secrets.TARGET_DIR }}
-            mkdir -p ${{ secrets.PUBLIC_DIR }}
+            set -e
+            TARGET_DIR="${{ secrets.TARGET_DIR }}"
+            PUBLIC_DIR="${{ secrets.PUBLIC_DIR }}"
+
+            if [ -z "$TARGET_DIR" ] || [ -z "$PUBLIC_DIR" ]; then
+              echo "TARGET_DIR or PUBLIC_DIR is empty. Check repository secrets."
+              exit 1
+            fi
+
+            mkdir -p "$TARGET_DIR"
+            mkdir -p "$PUBLIC_DIR"
 
       - name: Upload artifact
         uses: appleboy/scp-action@v0.1.6
