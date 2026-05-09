@@ -4,17 +4,17 @@
 Set this in frontend environment before build:
 
 ```
-VITE_API_BASE_URL=https://app.apnistationery.com/api/index.php
+VITE_API_BASE_URL=https://app.apnistationery.com/api/index.php/api
 ```
 
 Why this is safer on shared hosting:
 - `/api/index.php/...` bypasses dependency on web-server rewrite rules.
-- If rewrites are configured correctly, `/api/...` also works. But `index.php` path avoids route 404 caused by rewrite misconfiguration.
+- In this setup Laravel still uses `api` prefix, so the effective base becomes `/api/index.php/api`.
 
 If backend is on a different domain, set that domain instead:
 
 ```
-VITE_API_BASE_URL=https://api.apnistationery.com/api/index.php
+VITE_API_BASE_URL=https://api.apnistationery.com/api/index.php/api
 ```
 
 ## 2) Backend process auto-start
@@ -58,7 +58,7 @@ Confirm API is reachable:
 
 ```
 curl -i https://app.apnistationery.com/api/auth/login
-curl -i https://app.apnistationery.com/api/index.php/auth/login
+curl -i https://app.apnistationery.com/api/index.php/api/auth/login
 ```
 
 Expected result: no 404 route miss. You should get a validation response (`422`) for missing body or `405` for method mismatch when endpoint is reachable.

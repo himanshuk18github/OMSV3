@@ -35,8 +35,8 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         env:
-          # Use canonical API base; /api folder is deployed and handled by API .htaccess.
-          VITE_API_BASE_URL: https://app.apnistationery.com/api
+          # Hostinger/LiteSpeed setup requires index.php front controller and Laravel api prefix.
+          VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php/api
         run: |
           npm ci --legacy-peer-deps
           npm run build
