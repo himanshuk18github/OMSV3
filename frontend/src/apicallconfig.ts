@@ -11,7 +11,7 @@ function normalizeApiBaseUrl(url: string): string {
 
 const fallbackApiUrl = isLocalhost
   ? "http://localhost:8000/api"
-  : `${window.location.origin}/api/index.php`;
+  : `${window.location.origin}/api/index.php/api`;
 
 const API_BASE_URL = normalizeApiBaseUrl(envApiUrl || fallbackApiUrl);
 
