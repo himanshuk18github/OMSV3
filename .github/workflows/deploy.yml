@@ -57,7 +57,7 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         env:
-          VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php/api
+          VITE_API_BASE_URL: https://app.apnistationery.com/api
         run: |
           if [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps

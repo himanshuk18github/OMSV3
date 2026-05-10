@@ -1,0 +1,7 @@
+.vscode/
+DB_MIGRATION_08-05-2026/
+backend/vendor/
+frontend/node_modules/
+frontend/dist/
+.env
+*.log
