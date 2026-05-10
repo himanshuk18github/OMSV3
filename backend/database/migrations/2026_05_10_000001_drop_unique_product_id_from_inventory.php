@@ -9,10 +9,23 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('inventory', function (Blueprint $table) {
+            // Attempt multiple strategies to remove a unique constraint named by convention
+            // and ensure a non-unique index remains on `product_id`.
             try {
-                $table->dropUnique(['product_id']);
+                // Most reliable if the index has the default Laravel name
+                $table->dropUnique('inventory_product_id_unique');
             } catch (\Throwable $e) {
-                // Unique index may already be absent in some environments.
+                // Try by column list as a fallback
+                try {
+                    $table->dropUnique(['product_id']);
+                } catch (\Throwable $e) {
+                    // Last resort: attempt raw SQL drop (MySQL flavor)
+                    try {
+                        DB::statement('ALTER TABLE `inventory` DROP INDEX `inventory_product_id_unique`');
+                    } catch (\Throwable $e) {
+                        // If still failing, ignore — index may not exist or DB driver differs.
+                    }
+                }
             }
 
             try {
