@@ -92,7 +92,7 @@ class ImportController extends Controller
             if ((string) $exception->getCode() === '23000') {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Import failed because one or more rows duplicate an existing product_id or fixed_sku.',
+                    'message' => 'Import failed because one or more rows duplicate an existing fixed_sku.',
                 ], 422);
             }
 
@@ -265,7 +265,6 @@ class ImportController extends Controller
         $gstRate = (float) ($row['gst_rate'] ?? 0);
 
         if ($productId === '') $errors[] = 'product_id is required';
-        if ($productId !== '' && Inventory::query()->where('product_id', $productId)->exists()) $errors[] = 'product_id already exists';
         if ($fixedSku === '') $errors[] = 'fixed_sku is required';
         if ($fixedSku !== '' && Inventory::query()->where('fixed_sku', $fixedSku)->exists()) $errors[] = 'fixed_sku already exists';
         if ($productName === '') $errors[] = 'product_name is required';
@@ -276,11 +275,6 @@ class ImportController extends Controller
         if ($sellingPrice < 0) $errors[] = 'selling_price must be 0 or greater';
         if ($sellingPrice > $mrp && $mrp > 0) $errors[] = 'selling_price cannot be greater than mrp';
         if ($gstRate < 0 || $gstRate > 100) $errors[] = 'gst_rate must be between 0 and 100';
-
-        $productIdCount = collect($allRows)->pluck('product_id')->map(fn ($value) => trim((string) $value))->filter()->countBy();
-        if ($productId !== '' && ($productIdCount[$productId] ?? 0) > 1) {
-            $errors[] = 'product_id is duplicated in the uploaded file';
-        }
 
         $fixedSkuCount = collect($allRows)->pluck('fixed_sku')->map(fn ($value) => strtoupper(trim((string) $value)))->filter()->countBy();
         if ($fixedSku !== '' && ($fixedSkuCount[$fixedSku] ?? 0) > 1) {
