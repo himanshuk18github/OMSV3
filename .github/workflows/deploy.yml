@@ -14,7 +14,7 @@ jobs:
     env:
       DEPLOY_DOMAIN: app.apnistationery.com
       SSH_HOST: 82.112.232.23
-      SSH_PORT: 65002
+      SSH_PORT: "65002"
       SSH_USER: u902868468
       TARGET_DIR: /home/u902868468/app
       PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
@@ -27,11 +27,11 @@ jobs:
       - name: Validate repository structure
         run: |
           set -e
-          test -f backend/composer.json || { echo "Missing backend/composer.json"; exit 1; }
-          test -f frontend/package.json || { echo "Missing frontend/package.json"; exit 1; }
-          test "$DEPLOY_DOMAIN" = "app.apnistationery.com" || { echo "Unsafe DEPLOY_DOMAIN"; exit 1; }
-          test "$TARGET_DIR" = "/home/u902868468/app" || { echo "Unsafe TARGET_DIR"; exit 1; }
-          test "$PUBLIC_DIR" = "/home/u902868468/domains/app.apnistationery.com/public_html" || { echo "Unsafe PUBLIC_DIR"; exit 1; }
+          test -f backend/composer.json  || { echo "Missing backend/composer.json"; exit 1; }
+          test -f frontend/package.json  || { echo "Missing frontend/package.json"; exit 1; }
+          test "$DEPLOY_DOMAIN" = "app.apnistationery.com"                                          || { echo "Unsafe DEPLOY_DOMAIN"; exit 1; }
+          test "$TARGET_DIR"    = "/home/u902868468/app"                                            || { echo "Unsafe TARGET_DIR";    exit 1; }
+          test "$PUBLIC_DIR"    = "/home/u902868468/domains/app.apnistationery.com/public_html"     || { echo "Unsafe PUBLIC_DIR";    exit 1; }
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -79,13 +79,18 @@ jobs:
             -o StrictHostKeyChecking=no \
             -p "${{ env.SSH_PORT }}" \
             "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-            "mkdir -p '${{ env.TARGET_DIR }}/staging/backend' '${{ env.TARGET_DIR }}/staging/frontend_dist' '${{ env.TARGET_DIR }}/staging/api' '${{ env.TARGET_DIR }}/backups' '${{ env.PUBLIC_DIR }}/api'"
+            "mkdir -p \
+              '${{ env.TARGET_DIR }}/staging/backend' \
+              '${{ env.TARGET_DIR }}/staging/frontend_dist' \
+              '${{ env.TARGET_DIR }}/staging/api' \
+              '${{ env.TARGET_DIR }}/backups' \
+              '${{ env.PUBLIC_DIR }}/api'"
 
       - name: Upload backend and frontend to staging
         run: |
           set -e
           RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${{ env.SSH_PORT }}"
-          rsync -az --delete -e "$RSYNC_SSH" backend/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/backend/"
+          rsync -az --delete -e "$RSYNC_SSH" backend/       "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/backend/"
           rsync -az --delete -e "$RSYNC_SSH" frontend/dist/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/frontend_dist/"
 
       - name: Prepare backend and staged API on remote
@@ -168,59 +173,59 @@ jobs:
             mkdir -p "$BACKEND_LIVE/bootstrap/cache"
             chmod -R 775 "$BACKEND_LIVE/storage" "$BACKEND_LIVE/bootstrap/cache" || true
 
-            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteCond %{HTTP:Authorization} .
-  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteRule ^ index.php [L]
-</IfModule>
-HTACCESS
+            printf '%s\n' \
+              '<IfModule mod_rewrite.c>' \
+              '  RewriteEngine On' \
+              '  RewriteCond %{HTTP:Authorization} .' \
+              '  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]' \
+              '  RewriteCond %{REQUEST_FILENAME} !-d' \
+              '  RewriteCond %{REQUEST_FILENAME} !-f' \
+              '  RewriteRule ^ index.php [L]' \
+              '</IfModule>' \
+              > "$STAGED_API/.htaccess"
 
-            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteBase /
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
-  RewriteRule ^ - [L]
-  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
-  RewriteRule ^ index.html [L]
-</IfModule>
-HTACCESS
+            printf '%s\n' \
+              '<IfModule mod_rewrite.c>' \
+              '  RewriteEngine On' \
+              '  RewriteBase /' \
+              '  RewriteCond %{REQUEST_FILENAME} -f [OR]' \
+              '  RewriteCond %{REQUEST_FILENAME} -d' \
+              '  RewriteRule ^ - [L]' \
+              '  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]' \
+              '  RewriteRule ^ index.html [L]' \
+              '</IfModule>' \
+              > "$STAGING_FRONTEND/.htaccess"
 
-            cat > "$STAGED_API/index.php" <<PHP
-<?php
+            printf '%s\n' \
+              '<?php' \
+              '' \
+              'use Illuminate\Foundation\Application;' \
+              'use Illuminate\Http\Request;' \
+              '' \
+              'define('"'"'LARAVEL_START'"'"', microtime(true));' \
+              '' \
+              '\$backendRoot = '"'"'$BACKEND_LIVE'"'"';' \
+              '' \
+              'if (file_exists(\$maintenance = \$backendRoot.'"'"'/storage/framework/maintenance.php'"'"')) {' \
+              '    require \$maintenance;' \
+              '}' \
+              '' \
+              'require \$backendRoot.'"'"'/vendor/autoload.php'"'"';' \
+              '' \
+              '/** @var Application \$app */' \
+              '\$app = require_once \$backendRoot.'"'"'/bootstrap/app.php'"'"';' \
+              '' \
+              '\$app->handleRequest(Request::capture());' \
+              > "$STAGED_API/index.php"
 
-use Illuminate\Foundation\Application;
-use Illuminate\Http\Request;
-
-define('LARAVEL_START', microtime(true));
-
-\$backendRoot = '$BACKEND_LIVE';
-
-if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
-    require \$maintenance;
-}
-
-require \$backendRoot.'/vendor/autoload.php';
-
-/** @var Application \$app */
-\$app = require_once \$backendRoot.'/bootstrap/app.php';
-
-\$app->handleRequest(Request::capture());
-PHP
-
-            cat > "$STAGED_API/test_post.php" <<'PHP'
-<?php
-header('Content-Type: application/json');
-echo json_encode([
-  'method' => $_SERVER['REQUEST_METHOD'],
-  'body' => file_get_contents('php://input'),
-]);
-PHP
+            printf '%s\n' \
+              '<?php' \
+              'header('"'"'Content-Type: application/json'"'"');' \
+              'echo json_encode([' \
+              '  '"'"'method'"'"' => $_SERVER['REQUEST_METHOD'],' \
+              '  '"'"'body'"'"'   => file_get_contents('"'"'php://input'"'"'),' \
+              ']);' \
+              > "$STAGED_API/test_post.php"
 
             if [ -x "${{ env.PHP_BIN }}" ]; then
               PHP_BIN="${{ env.PHP_BIN }}"
@@ -231,7 +236,7 @@ PHP
             "$PHP_BIN" "$BACKEND_LIVE/artisan" optimize:clear || true
 
             DB_CONN=$(grep -E '^DB_CONNECTION=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
-            DB_PASS=$(grep -E '^DB_PASSWORD=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
+            DB_PASS=$(grep -E '^DB_PASSWORD='  "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
             if [ "${DB_CONN:-}" = "mysql" ] && [ -n "$DB_PASS" ]; then
               "$PHP_BIN" "$BACKEND_LIVE/artisan" migrate --force --no-interaction || true
             else
@@ -239,8 +244,8 @@ PHP
             fi
 
             "$PHP_BIN" "$BACKEND_LIVE/artisan" config:cache || true
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" route:cache || true
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" view:cache || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" route:cache  || true
+            "$PHP_BIN" "$BACKEND_LIVE/artisan" view:cache   || true
 
       - name: Publish staged frontend/api to production only when FORCE_DEPLOY=true
         uses: appleboy/ssh-action@v1.0.3
@@ -264,7 +269,8 @@ PHP
               exit 0
             fi
 
-            if [ "$TARGET_DIR" != "/home/u902868468/app" ] || [ "$PUBLIC_DIR" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
+            if [ "$TARGET_DIR" != "/home/u902868468/app" ] || \
+               [ "$PUBLIC_DIR" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
               echo "Safety check failed for path lock."
               exit 1
             fi
@@ -274,7 +280,7 @@ PHP
             tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$PUBLIC_DIR" . || true
 
             rsync -a "$STAGING_FRONTEND/" "$PUBLIC_DIR/"
-            rsync -a "$STAGED_API/" "$PUBLIC_DIR/api/"
+            rsync -a "$STAGED_API/"       "$PUBLIC_DIR/api/"
 
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
