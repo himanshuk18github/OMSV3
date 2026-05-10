@@ -12,6 +12,7 @@ use App\Models\RtoPackage;
 use App\Models\Settlement;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -80,12 +81,23 @@ class ImportController extends Controller
         $userId = (int) Auth::id();
         $created = 0;
 
-        DB::transaction(function () use ($type, $rows, $userId, &$created) {
-            foreach ($rows as $row) {
-                $this->importRow($type, $row, $userId);
-                $created++;
+        try {
+            DB::transaction(function () use ($type, $rows, $userId, &$created) {
+                foreach ($rows as $row) {
+                    $this->importRow($type, $row, $userId);
+                    $created++;
+                }
+            });
+        } catch (QueryException $exception) {
+            if ((string) $exception->getCode() === '23000') {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Import failed because one or more rows duplicate an existing product_id or fixed_sku.',
+                ], 422);
             }
-        });
+
+            throw $exception;
+        }
 
         ImportHistory::query()->create([
             'import_type' => $type,
@@ -131,7 +143,7 @@ class ImportController extends Controller
     private function normalizeAndValidateRow(string $type, array $row, array $allRows, int $index): array
     {
         return match ($type) {
-            'inventory' => $this->validateInventoryRow($row),
+            'inventory' => $this->validateInventoryRow($row, $allRows, $index),
             'inventory_logs' => $this->validateInventoryLogRow($row),
             'orders' => $this->validateOrderRow($row, $allRows, $index),
             'order_items' => $this->validateOrderItemRow($row),
@@ -239,7 +251,7 @@ class ImportController extends Controller
         };
     }
 
-    private function validateInventoryRow(array $row): array
+    private function validateInventoryRow(array $row, array $allRows, int $index): array
     {
         $errors = [];
         $productId = trim((string) ($row['product_id'] ?? ''));
@@ -253,8 +265,9 @@ class ImportController extends Controller
         $gstRate = (float) ($row['gst_rate'] ?? 0);
 
         if ($productId === '') $errors[] = 'product_id is required';
-    if ($productId !== '' && Inventory::query()->where('product_id', $productId)->exists()) $errors[] = 'product_id already exists';
+        if ($productId !== '' && Inventory::query()->where('product_id', $productId)->exists()) $errors[] = 'product_id already exists';
         if ($fixedSku === '') $errors[] = 'fixed_sku is required';
+        if ($fixedSku !== '' && Inventory::query()->where('fixed_sku', $fixedSku)->exists()) $errors[] = 'fixed_sku already exists';
         if ($productName === '') $errors[] = 'product_name is required';
         if (!in_array($itemType, ['OWN', 'VENDOR'], true)) $errors[] = 'item_type must be OWN or VENDOR';
         if ($quantity < 0) $errors[] = 'qty must be 0 or greater';
@@ -263,6 +276,16 @@ class ImportController extends Controller
         if ($sellingPrice < 0) $errors[] = 'selling_price must be 0 or greater';
         if ($sellingPrice > $mrp && $mrp > 0) $errors[] = 'selling_price cannot be greater than mrp';
         if ($gstRate < 0 || $gstRate > 100) $errors[] = 'gst_rate must be between 0 and 100';
+
+        $productIdCount = collect($allRows)->pluck('product_id')->map(fn ($value) => trim((string) $value))->filter()->countBy();
+        if ($productId !== '' && ($productIdCount[$productId] ?? 0) > 1) {
+            $errors[] = 'product_id is duplicated in the uploaded file';
+        }
+
+        $fixedSkuCount = collect($allRows)->pluck('fixed_sku')->map(fn ($value) => strtoupper(trim((string) $value)))->filter()->countBy();
+        if ($fixedSku !== '' && ($fixedSkuCount[$fixedSku] ?? 0) > 1) {
+            $errors[] = 'fixed_sku is duplicated in the uploaded file';
+        }
 
         return [[
             'product_id' => $productId,
