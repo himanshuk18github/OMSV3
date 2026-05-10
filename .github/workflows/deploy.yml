@@ -215,7 +215,11 @@ jobs:
               '/** @var Application \$app */' \
               '\$app = require_once \$backendRoot.'"'"'/bootstrap/app.php'"'"';' \
               '' \
-              '\$app->handleRequest(Request::capture());' \
+              '\$kernel = \$app->make(\\Illuminate\\Contracts\\Http\\Kernel::class);' \
+              '\$request = Request::capture();' \
+              '\$response = \$kernel->handle(\$request);' \
+              '\$response->send();' \
+              '\$kernel->terminate(\$request, \$response);' \
               > "$STAGED_API/index.php"
 
             printf '%s\n' \
