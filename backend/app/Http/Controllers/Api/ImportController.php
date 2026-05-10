@@ -327,7 +327,13 @@ class ImportController extends Controller
         $orderDate = $this->parseDate($row['order_date'] ?? null);
         $salesChannel = strtoupper(trim((string) ($row['sales_channel'] ?? '')));
         $state = strtoupper(trim((string) ($row['state'] ?? '')));
-        $status = strtolower(trim((string) ($row['status'] ?? 'pending')));
+        $rawStatus = trim((string) ($row['status'] ?? 'pending'));
+        $normalizedStatus = strtolower($rawStatus === '' ? 'pending' : $rawStatus);
+        // map legacy 'rto' to canonical 'rto_delivered' used by DB enum
+        if ($normalizedStatus === 'rto') {
+            $normalizedStatus = 'rto_delivered';
+        }
+        $status = $normalizedStatus;
         $customerPhone = trim((string) ($row['customer_phone'] ?? ''));
         $customerEmail = trim((string) ($row['customer_email'] ?? ''));
 
@@ -344,7 +350,9 @@ class ImportController extends Controller
         if (!$orderDate) $errors[] = 'order_date must be valid date';
         if (!in_array($salesChannel, $this->salesChannels, true)) $errors[] = 'sales_channel is invalid';
         if (!in_array($state, $this->stateNames, true)) $errors[] = 'state is invalid';
-        if (!in_array($status, ['draft','pending','confirmed','packed','dispatched','in_transit','delivered','cancelled','rto'], true)) $errors[] = 'status is invalid';
+        // accept both legacy 'rto' and canonical 'rto_delivered' during validation;
+        // we already normalize 'rto' -> 'rto_delivered' above before inserting.
+        if (!in_array($status, ['draft','pending','confirmed','packed','dispatched','in_transit','delivered','cancelled','rto','rto_delivered'], true)) $errors[] = 'status is invalid';
 
         return [[
             'ref_no' => $refNo,
