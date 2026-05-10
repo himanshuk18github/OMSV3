@@ -264,11 +264,6 @@ jobs:
             STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
             STAGED_API="$TARGET_DIR/staging/api"
 
-            if [ "${{ secrets.FORCE_DEPLOY }}" != "true" ]; then
-              echo "FORCE_DEPLOY is not true. Skipping production publish."
-              exit 0
-            fi
-
             if [ "$TARGET_DIR" != "/home/u902868468/app" ] || \
                [ "$PUBLIC_DIR" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
               echo "Safety check failed for path lock."
@@ -279,6 +274,7 @@ jobs:
             ts=$(date +%Y%m%d%H%M%S)
             tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$PUBLIC_DIR" . || true
 
+            rm -f "$PUBLIC_DIR/default.php" "$PUBLIC_DIR/index.php" "$PUBLIC_DIR/index.html"
             rsync -a "$STAGING_FRONTEND/" "$PUBLIC_DIR/"
             rsync -a "$STAGED_API/"       "$PUBLIC_DIR/api/"
 
