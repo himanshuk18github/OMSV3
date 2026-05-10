@@ -197,29 +197,29 @@ jobs:
               > "$STAGING_FRONTEND/.htaccess"
 
             cat > "$STAGED_API/index.php" <<'EOF'
-<?php
+            <?php
 
-use Illuminate\Contracts\Http\Kernel;
-use Illuminate\Http\Request;
+            use Illuminate\Contracts\Http\Kernel;
+            use Illuminate\Http\Request;
 
-define('LARAVEL_START', microtime(true));
+            define('LARAVEL_START', microtime(true));
 
-$backendRoot = '__BACKEND_ROOT__';
+            $backendRoot = '__BACKEND_ROOT__';
 
-if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
-    require $maintenance;
-}
+            if (file_exists($maintenance = $backendRoot.'/storage/framework/maintenance.php')) {
+              require $maintenance;
+            }
 
-require $backendRoot.'/vendor/autoload.php';
+            require $backendRoot.'/vendor/autoload.php';
 
-$app = require_once $backendRoot.'/bootstrap/app.php';
-$kernel = $app->make(Kernel::class);
-$request = Request::capture();
+            $app = require_once $backendRoot.'/bootstrap/app.php';
+            $kernel = $app->make(Kernel::class);
+            $request = Request::capture();
 
-$response = $kernel->handle($request);
-$response->send();
-$kernel->terminate($request, $response);
-EOF
+            $response = $kernel->handle($request);
+            $response->send();
+            $kernel->terminate($request, $response);
+            EOF
 
             sed -i "s#__BACKEND_ROOT__#$BACKEND_LIVE#g" "$STAGED_API/index.php"
 
