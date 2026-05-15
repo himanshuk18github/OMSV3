@@ -119,11 +119,12 @@ const SalesOrdersPage = () => {
         const total = cards.find((c) => c.key === "total_orders")?.count || 0;
         setTotalOrders(total);
         
-        // Calculate pending update count (pending + confirmed + packed)
+        // Calculate pending update count (pending + confirmed + packed + dispatched)
         const pending = cards.find((c) => c.key === "pending")?.count || 0;
         const confirmed = cards.find((c) => c.key === "confirmed")?.count || 0;
         const packed = cards.find((c) => c.key === "packed")?.count || 0;
-        setPendingUpdateCount(pending + confirmed + packed);
+        const dispatched = cards.find((c) => c.key === "dispatched")?.count || 0;
+        setPendingUpdateCount(pending + confirmed + packed + dispatched);
         
         // Map to bifurcation format
         const bifurcationMap: { [key: string]: BifurcationItem } = {
