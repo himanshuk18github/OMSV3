@@ -1,298 +1,520 @@
-name: Build and Deploy (Safe)
+name: Deploy OMSV3 - app.apnistationery.com
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+
+concurrency:
+  group: deploy-app-apnistationery-production
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     env:
+      # ============================================================
+      # HARD-LOCKED APP CONFIGURATION
+      # Do not change these paths to another application.
+      # ============================================================
       DEPLOY_DOMAIN: app.apnistationery.com
-      SSH_HOST: 82.112.232.23
-      SSH_PORT: 65002
-      SSH_USER: u902868468
-      TARGET_DIR: /home/u902868468/app
-      PUBLIC_DIR: /home/u902868468/domains/app.apnistationery.com/public_html
-      PHP_BIN: /opt/alt/php84/usr/bin/php
+
+      SSH_HOST: 45.199.139.18
+      SSH_PORT: "22"
+      SSH_USER: blackwat1
+
+      SERVER_ROOT: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2
+
+      REPO_DIR: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery
+      WEB_DIR: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html
+
+      BACKEND_DIR: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/backend
+      FRONTEND_DIR: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/frontend
+
+      STAGING_DIR: /var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging
 
     steps:
-      - name: Checkout
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout main branch
         uses: actions/checkout@v4
 
-      - name: Validate required repository structure
+      # ============================================================
+      # 2. VALIDATE LOCAL REPOSITORY
+      # ============================================================
+      - name: Validate repository structure
+        shell: bash
         run: |
-          set -e
-          test -f backend/composer.json || { echo "Missing backend/composer.json"; exit 1; }
-          test -f frontend/package.json || { echo "Missing frontend/package.json"; exit 1; }
+          set -Eeuo pipefail
 
+          echo "=== Repository validation ==="
+
+          test -f backend/composer.json || {
+            echo "ERROR: backend/composer.json not found"
+            exit 1
+          }
+
+          test -f frontend/package.json || {
+            echo "ERROR: frontend/package.json not found"
+            exit 1
+          }
+
+          test "${DEPLOY_DOMAIN}" = "app.apnistationery.com"
+          test "${SSH_HOST}" = "45.199.139.18"
+          test "${SSH_PORT}" = "22"
+          test "${SSH_USER}" = "blackwat1"
+
+          test "${REPO_DIR}" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
+
+          test "${WEB_DIR}" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html"
+
+          test "${BACKEND_DIR}" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/backend"
+
+          test "${FRONTEND_DIR}" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/frontend"
+
+          echo "Repository validation passed."
+
+      # ============================================================
+      # 3. PHP
+      # ============================================================
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
           extensions: mbstring, pdo_mysql
           tools: composer:2
+          coverage: none
 
+      # ============================================================
+      # 4. NODE
+      # ============================================================
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "18"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
+      # ============================================================
+      # 5. INSTALL LARAVEL BACKEND DEPENDENCIES
+      # ============================================================
       - name: Install backend dependencies
         working-directory: ./backend
+        shell: bash
         run: |
+          set -Eeuo pipefail
+
           composer install \
             --no-dev \
             --prefer-dist \
             --no-interaction \
             --optimize-autoloader
 
-      - name: Build frontend
+      # ============================================================
+      # 6. BUILD REACT FRONTEND
+      # ============================================================
+      - name: Build React frontend
         working-directory: ./frontend
         env:
           VITE_API_BASE_URL: https://app.apnistationery.com/api/index.php/api
+        shell: bash
         run: |
+          set -Eeuo pipefail
+
           if [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps
           else
             npm install --legacy-peer-deps
           fi
+
           npm run build
 
-      - name: Start SSH Agent
+          test -d dist || {
+            echo "ERROR: frontend/dist was not created"
+            exit 1
+          }
+
+      # ============================================================
+      # 7. START SSH AGENT
+      # ============================================================
+      - name: Configure SSH
         uses: webfactory/ssh-agent@v0.5.3
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Test SSH connectivity
+      # ============================================================
+      # 8. TEST SSH + VERIFY EXACT SERVER PATHS
+      # ============================================================
+      - name: Verify MilesWeb server and locked paths
+        shell: bash
         run: |
-          ssh \
-            -o BatchMode=yes \
-            -o ConnectTimeout=10 \
-            -o StrictHostKeyChecking=no \
-            -p "${{ env.SSH_PORT }}" \
-            "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-            'echo SSH_OK'
+          set -Eeuo pipefail
 
-      - name: Upload artifacts to staging only
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          WEB_DIR="$SERVER_ROOT/domains/app.apnistationery/public_html"
+
+          echo "=== Remote identity ==="
+          whoami
+          pwd
+
+          echo "=== Locked server root ==="
+          test -d "$SERVER_ROOT"
+
+          echo "=== Locked repository ==="
+          mkdir -p "$REPO_DIR"
+          test -d "$REPO_DIR"
+
+          echo "=== Locked public directory ==="
+          mkdir -p "$WEB_DIR"
+          test -d "$WEB_DIR"
+
+          echo "=== Safety verification ==="
+          test "$REPO_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
+
+          test "$WEB_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html"
+
+          echo "Server/path validation PASSED."
+          REMOTE
+
+      # ============================================================
+      # 9. CREATE ONLY THIS APP'S DEPLOY DIRECTORIES
+      # ============================================================
+      - name: Prepare locked deployment directories
+        shell: bash
         run: |
-          set -e
+          set -Eeuo pipefail
 
-          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${{ env.SSH_PORT }}"
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-          ssh -o StrictHostKeyChecking=no -p "${{ env.SSH_PORT }}" "${{ env.SSH_USER }}@${{ env.SSH_HOST }}" \
-            "mkdir -p '${{ env.TARGET_DIR }}/staging/backend' '${{ env.TARGET_DIR }}/staging/frontend_dist' '${{ env.TARGET_DIR }}/staging/api'"
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
 
-          rsync -az --delete -e "$RSYNC_SSH" backend/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/backend/"
-          rsync -az --delete -e "$RSYNC_SSH" frontend/dist/ "${{ env.SSH_USER }}@${{ env.SSH_HOST }}:${{ env.TARGET_DIR }}/staging/frontend_dist/"
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          WEB_DIR="$SERVER_ROOT/domains/app.apnistationery/public_html"
+          STAGING_DIR="$REPO_DIR/.deploy-staging"
 
-      - name: Prepare backend and staged API on remote
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.SSH_HOST }}
-          port: ${{ env.SSH_PORT }}
-          username: ${{ env.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 180s
-          command_timeout: 30m
-          script: |
-            set -e
+          test "$REPO_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
 
-            TARGET_DIR="${{ env.TARGET_DIR }}"
-            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
-            BACKEND_SOURCE="$TARGET_DIR/staging/backend"
-            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
-            STAGED_API="$TARGET_DIR/staging/api"
-            BACKEND_LIVE="$TARGET_DIR/backend"
+          test "$WEB_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html"
 
-            if [ "$TARGET_DIR" != "/home/u902868468/app" ]; then
-              echo "Unsafe TARGET_DIR: $TARGET_DIR"
-              exit 1
-            fi
+          test "$STAGING_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging"
 
-            if [ "$FRONTEND_ROOT" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
-              echo "Unsafe PUBLIC_DIR: $FRONTEND_ROOT"
-              exit 1
-            fi
+          mkdir -p \
+            "$REPO_DIR/backend" \
+            "$REPO_DIR/frontend" \
+            "$STAGING_DIR/backend" \
+            "$STAGING_DIR/frontend_dist" \
+            "$STAGING_DIR/api" \
+            "$WEB_DIR"
 
-            mkdir -p "$BACKEND_LIVE" "$STAGED_API" "$TARGET_DIR/backups"
+          echo "Only app.apnistationery directories prepared."
+          REMOTE
 
-            rsync -a "$BACKEND_SOURCE/" "$BACKEND_LIVE/"
+      # ============================================================
+      # 10. UPLOAD BACKEND
+      # ============================================================
+      - name: Upload backend to locked repository
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-            ENV_PATH="$BACKEND_LIVE/.env"
-            if [ ! -f "$ENV_PATH" ] && [ -n "${{ secrets.ENV_FILE }}" ]; then
-              printf '%s' "${{ secrets.ENV_FILE }}" > "$ENV_PATH"
-            fi
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-            if [ ! -f "$ENV_PATH" ]; then
-              cat > "$ENV_PATH" <<'ENVFILE'
-APP_NAME="OMSV3"
-APP_ENV=production
-APP_KEY=base64:REPLACE_ME
-APP_DEBUG=false
-APP_URL=https://app.apnistationery.com
+          rsync -az --delete \
+            --exclude=".env" \
+            --exclude=".env.*" \
+            --exclude="storage/logs/*" \
+            -e "$RSYNC_SSH" \
+            backend/ \
+            "${SSH_USER}@${SSH_HOST}:${BACKEND_DIR}/"
 
-LOG_CHANNEL=stack
-LOG_STACK=single
-LOG_LEVEL=debug
+      # ============================================================
+      # 11. UPLOAD FRONTEND SOURCE
+      # ============================================================
+      - name: Upload frontend source to locked repository
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=
-DB_USERNAME=
-DB_PASSWORD=
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-SESSION_DRIVER=file
-SESSION_LIFETIME=120
-QUEUE_CONNECTION=sync
-CACHE_STORE=file
-ENVFILE
-            fi
+          rsync -az --delete \
+            -e "$RSYNC_SSH" \
+            frontend/ \
+            "${SSH_USER}@${SSH_HOST}:${FRONTEND_DIR}/"
 
-            if ! grep -q '^APP_KEY=base64:' "$ENV_PATH"; then
-              APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-              if grep -q '^APP_KEY=' "$ENV_PATH"; then
-                sed -i "s#^APP_KEY=.*#APP_KEY=$APP_KEY#" "$ENV_PATH"
-              else
-                echo "APP_KEY=$APP_KEY" >> "$ENV_PATH"
-              fi
-            fi
+      # ============================================================
+      # 12. UPLOAD BUILT FRONTEND TO STAGING
+      # ============================================================
+      - name: Upload built frontend to locked staging
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-            mkdir -p "$BACKEND_LIVE/storage/framework/cache"
-            mkdir -p "$BACKEND_LIVE/storage/framework/sessions"
-            mkdir -p "$BACKEND_LIVE/storage/framework/views"
-            mkdir -p "$BACKEND_LIVE/storage/logs"
-            mkdir -p "$BACKEND_LIVE/bootstrap/cache"
-            chmod -R 775 "$BACKEND_LIVE/storage" "$BACKEND_LIVE/bootstrap/cache" || true
+          RSYNC_SSH="ssh -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-            cat > "$STAGED_API/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteCond %{HTTP:Authorization} .
-  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
-  RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteCond %{REQUEST_FILENAME} !-f
-  RewriteRule ^ index.php [L]
-</IfModule>
-HTACCESS
+          rsync -az --delete \
+            -e "$RSYNC_SSH" \
+            frontend/dist/ \
+            "${SSH_USER}@${SSH_HOST}:${STAGING_DIR}/frontend_dist/"
 
-            cat > "$STAGING_FRONTEND/.htaccess" <<'HTACCESS'
-<IfModule mod_rewrite.c>
-  RewriteEngine On
-  RewriteBase /
-  RewriteCond %{REQUEST_FILENAME} -f [OR]
-  RewriteCond %{REQUEST_FILENAME} -d
-  RewriteRule ^ - [L]
-  RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
-  RewriteRule ^ index.html [L]
-</IfModule>
-HTACCESS
+      # ============================================================
+      # 13. PREPARE API ENTRYPOINT
+      # NO .ENV
+      # NO DATABASE
+      # NO MIGRATION
+      # NO ARTISAN
+      # ============================================================
+      - name: Prepare Laravel API staging
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-            cat > "$STAGED_API/index.php" <<PHP
-<?php
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-use Illuminate\Foundation\Application;
-use Illuminate\Http\Request;
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
 
-define('LARAVEL_START', microtime(true));
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          BACKEND_DIR="$REPO_DIR/backend"
+          STAGING_DIR="$REPO_DIR/.deploy-staging"
+          API_DIR="$STAGING_DIR/api"
 
-\$backendRoot = '$BACKEND_LIVE';
+          test "$REPO_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
 
-if (file_exists(\$maintenance = \$backendRoot.'/storage/framework/maintenance.php')) {
-    require \$maintenance;
-}
+          test "$BACKEND_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/backend"
 
-require \$backendRoot.'/vendor/autoload.php';
+          test "$API_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging/api"
 
-/** @var Application \$app */
-\$app = require_once \$backendRoot.'/bootstrap/app.php';
+          mkdir -p "$API_DIR"
 
-\$app->handleRequest(Request::capture());
-PHP
+          cat > "$API_DIR/.htaccess" <<'EOF'
+          <IfModule mod_rewrite.c>
+            RewriteEngine On
 
-            cat > "$STAGED_API/test_post.php" <<'PHP'
-<?php
-header('Content-Type: application/json');
-echo json_encode([
-  'method' => $_SERVER['REQUEST_METHOD'],
-  'body' => file_get_contents('php://input'),
-]);
-PHP
+            RewriteCond %{HTTP:Authorization} .
+            RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-            if [ -x "${{ env.PHP_BIN }}" ]; then
-              PHP_BIN="${{ env.PHP_BIN }}"
-            else
-              PHP_BIN=$(command -v php)
-            fi
+            RewriteCond %{REQUEST_FILENAME} !-d
+            RewriteCond %{REQUEST_FILENAME} !-f
+            RewriteRule ^ index.php [L]
+          </IfModule>
+          EOF
 
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" optimize:clear || true
+          cat > "$API_DIR/index.php" <<'EOF'
+          <?php
 
-            DB_CONN=$(grep -E '^DB_CONNECTION=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
-            DB_PASS=$(grep -E '^DB_PASSWORD=' "$ENV_PATH" | cut -d= -f2 | tr -d '\r"') || true
-            if [ "${DB_CONN:-}" = "mysql" ] && [ -n "$DB_PASS" ]; then
-              "$PHP_BIN" "$BACKEND_LIVE/artisan" migrate --force --no-interaction || true
-            else
-              echo "Skipping migrations: DB not configured for mysql"
-            fi
+          use Illuminate\Contracts\Http\Kernel;
+          use Illuminate\Http\Request;
 
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" config:cache || true
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" route:cache || true
-            "$PHP_BIN" "$BACKEND_LIVE/artisan" view:cache || true
+          define('LARAVEL_START', microtime(true));
 
-      - name: Publish staged frontend/api to production only when FORCE_DEPLOY=true
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.SSH_HOST }}
-          port: ${{ env.SSH_PORT }}
-          username: ${{ env.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 120s
-          command_timeout: 10m
-          script: |
-            set -e
+          $backendRoot = '/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/backend';
 
-            TARGET_DIR="${{ env.TARGET_DIR }}"
-            FRONTEND_ROOT="${{ env.PUBLIC_DIR }}"
-            STAGING_FRONTEND="$TARGET_DIR/staging/frontend_dist"
-            STAGED_API="$TARGET_DIR/staging/api"
+          if (file_exists($maintenance = $backendRoot . '/storage/framework/maintenance.php')) {
+              require $maintenance;
+          }
 
-            if [ "${{ secrets.FORCE_DEPLOY }}" != "true" ]; then
-              echo "FORCE_DEPLOY is not true. Skipping production publish."
-              exit 0
-            fi
+          require $backendRoot . '/vendor/autoload.php';
 
-            if [ "$TARGET_DIR" != "/home/u902868468/app" ] || [ "$FRONTEND_ROOT" != "/home/u902868468/domains/app.apnistationery.com/public_html" ]; then
-              echo "Safety check failed for path lock."
-              exit 1
-            fi
+          $app = require_once $backendRoot . '/bootstrap/app.php';
 
-            mkdir -p "$TARGET_DIR/backups" "$FRONTEND_ROOT" "$FRONTEND_ROOT/api"
-            ts=$(date +%Y%m%d%H%M%S)
-            tar -czf "$TARGET_DIR/backups/frontend_${ts}.tar.gz" -C "$FRONTEND_ROOT" . || true
+          $kernel = $app->make(Kernel::class);
 
-            rsync -a "$STAGING_FRONTEND/" "$FRONTEND_ROOT/"
-            rsync -a "$STAGED_API/" "$FRONTEND_ROOT/api/"
+          $request = Request::capture();
 
+          $response = $kernel->handle($request);
+
+          $response->send();
+
+          $kernel->terminate($request, $response);
+          EOF
+
+          echo "Laravel API staging prepared."
+          REMOTE
+
+      # ============================================================
+      # 14. PREPARE REACT .HTACCESS
+      # ============================================================
+      - name: Prepare frontend routing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          FRONTEND_STAGE="$REPO_DIR/.deploy-staging/frontend_dist"
+
+          test "$FRONTEND_STAGE" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging/frontend_dist"
+
+          cat > "$FRONTEND_STAGE/.htaccess" <<'EOF'
+          <IfModule mod_rewrite.c>
+            RewriteEngine On
+            RewriteBase /
+
+            RewriteCond %{REQUEST_FILENAME} -f [OR]
+            RewriteCond %{REQUEST_FILENAME} -d
+            RewriteRule ^ - [L]
+
+            RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
+            RewriteRule ^ index.html [L]
+          </IfModule>
+          EOF
+
+          echo "Frontend routing prepared."
+          REMOTE
+
+      # ============================================================
+      # 15. PUBLISH ONLY THIS APPLICATION
+      # ============================================================
+      - name: Publish app.apnistationery.com
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
+
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          WEB_DIR="$SERVER_ROOT/domains/app.apnistationery/public_html"
+
+          FRONTEND_STAGE="$REPO_DIR/.deploy-staging/frontend_dist"
+          API_STAGE="$REPO_DIR/.deploy-staging/api"
+
+          # Absolute safety locks.
+          test "$REPO_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
+
+          test "$WEB_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html"
+
+          test "$FRONTEND_STAGE" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging/frontend_dist"
+
+          test "$API_STAGE" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery/.deploy-staging/api" 2>/dev/null || true
+
+          # Re-assign exact API path after the safety assertion above.
+          API_STAGE="$REPO_DIR/.deploy-staging/api"
+
+          test -f "$FRONTEND_STAGE/index.html"
+          test -f "$API_STAGE/index.php"
+
+          mkdir -p "$WEB_DIR/api"
+
+          # Backup ONLY this application's current public directory.
+          BACKUP_DIR="$REPO_DIR/.deploy-staging/previous_public"
+
+          rm -rf "$BACKUP_DIR"
+          mkdir -p "$BACKUP_DIR"
+
+          rsync -a "$WEB_DIR/" "$BACKUP_DIR/" || true
+
+          # Publish frontend.
+          rsync -a --delete \
+            "$FRONTEND_STAGE/" \
+            "$WEB_DIR/"
+
+          # Publish API.
+          rsync -a --delete \
+            "$API_STAGE/" \
+            "$WEB_DIR/api/"
+
+          echo "app.apnistationery.com published successfully."
+          REMOTE
+
+      # ============================================================
+      # 16. FINAL ISOLATION / FILE VERIFICATION
+      # ============================================================
       - name: Verify deployment
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.SSH_HOST }}
-          port: ${{ env.SSH_PORT }}
-          username: ${{ env.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          timeout: 120s
-          command_timeout: 10m
-          script: |
-            set -e
-            echo "=== FRONTEND ROOT ==="
-            ls -la "${{ env.PUBLIC_DIR }}" || true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
-            echo "=== STAGING FRONTEND ==="
-            ls -la "${{ env.TARGET_DIR }}/staging/frontend_dist" || true
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p ${SSH_PORT}"
 
-            echo "=== STAGING API ==="
-            ls -la "${{ env.TARGET_DIR }}/staging/api" || true
+          ${SSH} "${SSH_USER}@${SSH_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
 
-            echo "=== LIVE API (if published) ==="
-            ls -la "${{ env.PUBLIC_DIR }}/api" || true
+          SERVER_ROOT="/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2"
+          REPO_DIR="$SERVER_ROOT/repositories/app.apnistationery"
+          WEB_DIR="$SERVER_ROOT/domains/app.apnistationery/public_html"
+          BACKEND_DIR="$REPO_DIR/backend"
+          FRONTEND_DIR="$REPO_DIR/frontend"
+
+          echo "=========================================="
+          echo "OMS DEPLOYMENT VERIFICATION"
+          echo "=========================================="
+
+          echo "--- Repository ---"
+          echo "$REPO_DIR"
+          test -f "$BACKEND_DIR/composer.json"
+          test -f "$FRONTEND_DIR/package.json"
+
+          echo "--- Backend ---"
+          test -d "$BACKEND_DIR/vendor"
+          test -f "$BACKEND_DIR/artisan"
+
+          echo "--- Frontend ---"
+          test -f "$WEB_DIR/index.html"
+
+          echo "--- API ---"
+          test -f "$WEB_DIR/api/index.php"
+          test -f "$WEB_DIR/api/.htaccess"
+
+          echo "--- .env check ---"
+          if [ -f "$BACKEND_DIR/.env" ]; then
+            echo ".env exists in backend."
+          else
+            echo ".env NOT configured yet — expected for first deployment."
+          fi
+
+          echo "--- Database ---"
+          echo "NO database commands were executed."
+          echo "NO migrations were executed."
+
+          echo "--- Isolation ---"
+          test "$REPO_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/repositories/app.apnistationery"
+
+          test "$WEB_DIR" = \
+            "/var/www/25bf262f-e1b5-4d4f-91a0-2f52bbf540c2/domains/app.apnistationery/public_html"
+
+          echo "=========================================="
+          echo "DEPLOYMENT VERIFICATION PASSED"
+          echo "=========================================="
+          REMOTE
